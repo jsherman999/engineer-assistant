@@ -19,4 +19,10 @@ enum AppPaths {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
+
+    static var sandboxesDir: URL {
+        let dir = appSupport.appendingPathComponent("sandboxes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
 }

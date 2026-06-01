@@ -31,6 +31,25 @@ struct CoursePlayerView: View {
             }
             Divider()
             controls
+            terminalPanel
+        }
+    }
+
+    @ViewBuilder
+    private var terminalPanel: some View {
+        if let terminal = session.terminal {
+            Divider()
+            TerminalView(controller: terminal)
+                .frame(height: 280)
+        } else if course.environment == .linux {
+            Divider()
+            HStack {
+                Image(systemName: "shippingbox")
+                Text("Linux container shell is wired up in Phase 5.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(10)
         }
     }
 
@@ -112,8 +131,10 @@ struct CoursePlayerView: View {
     private func practiceText(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(text).textSelection(.enabled)
-            Text("Interactive shell coming in Phase 3.")
-                .font(.caption).foregroundStyle(.tertiary).italic()
+            if session.terminal != nil {
+                Text("Try it in the sandboxed shell below.")
+                    .font(.caption).foregroundStyle(.tertiary).italic()
+            }
         }
     }
 

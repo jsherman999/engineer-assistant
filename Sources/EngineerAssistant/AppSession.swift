@@ -12,6 +12,7 @@ final class AppSession: ObservableObject {
     @Published var activeCourse: Course? = nil
     @Published var currentLessonIdx: Int = 0
     @Published var courses: [Course] = []
+    @Published var terminal: MacOSTerminalController? = nil
 
     private let claude = ClaudeClient()
     private let courseGenerator = CourseGenerator()
@@ -104,6 +105,7 @@ final class AppSession: ObservableObject {
     func openCourse(_ course: Course) {
         activeCourse = course
         currentLessonIdx = 0
+        startTerminalIfSupported(for: course)
         Task {
             guard let sessionId else { return }
             await logLessonStart(course: course, idx: 0, sessionId: sessionId)
@@ -111,8 +113,11 @@ final class AppSession: ObservableObject {
     }
 
     func exitCourse() {
+        terminal?.stop()
+        terminal = nil
         guard let course = activeCourse, let sessionId else {
             activeCourse = nil
+            currentLessonIdx = 0
             return
         }
         Task {
@@ -120,6 +125,24 @@ final class AppSession: ObservableObject {
         }
         activeCourse = nil
         currentLessonIdx = 0
+    }
+
+    private func startTerminalIfSupported(for course: Course) {
+        terminal?.stop()
+        terminal = nil
+        guard course.environment == .macos, let sessionId else { return }
+        do {
+            let controller = try MacOSTerminalController(
+                courseId: course.id,
+                sessionId: sessionId,
+                eventStore: eventStore
+            )
+            try controller.start()
+            terminal = controller
+        } catch {
+            lastError = "Sandbox failed to start: \(error.localizedDescription)"
+            terminal = nil
+        }
     }
 
     func nextLesson() {
