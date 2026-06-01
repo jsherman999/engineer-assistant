@@ -13,12 +13,16 @@ enum ClaudeError: Error, LocalizedError {
     case missingAPIKey
     case httpError(Int, String)
     case decodingError
+    case noToolUseInResponse
+    case invalidCourseSchema(String)
 
     var errorDescription: String? {
         switch self {
         case .missingAPIKey: return "Anthropic API key is not set. Open Settings."
         case .httpError(let code, let body): return "Claude API error \(code): \(body)"
         case .decodingError: return "Failed to decode Claude response."
+        case .noToolUseInResponse: return "Claude did not return a course (no tool_use block)."
+        case .invalidCourseSchema(let why): return "Course JSON did not match schema: \(why)"
         }
     }
 }
@@ -97,6 +101,143 @@ final class ClaudeClient {
                     continuation.finish(throwing: error)
                 }
             }
+        }
+    }
+
+    static let courseModeSystemPrompt = """
+    You design short, hands-on lessons for a high-school STEM student learning MacOS, Linux, system administration, and coding.
+
+    Given a subject, design a SHORT course of 3 to 5 lessons total. Every lesson must be runnable in a single shell environment.
+
+    Pick the environment: use "macos" for topics about the macOS shell, MacOS administration, or Apple-specific tooling; use "linux" for bash, Linux sysadmin, web server topics, or anything that benefits from a sandboxed Linux container.
+
+    For each lesson include:
+    - concept_md: 100-200 word markdown explanation, with one or two short inline code examples.
+    - demos: 2 to 4 real commands the student should READ before trying. expected_output should be realistic and short.
+    - practice_prompt: one short paragraph inviting the student to experiment in the shell.
+    - challenge: one specific task with a deterministic verify check.
+
+    Verify types:
+    - exit_code: { "type":"exit_code", "exit_code": N } -- last command's exit code equals N.
+    - stdout_regex: { "type":"stdout_regex", "value": "regex" } -- last stdout matches regex.
+    - file_exists: { "type":"file_exists", "path": "/path" } -- file exists in the sandbox.
+    - file_contains: { "type":"file_contains", "path":"/path", "value":"substring" } -- file contains substring.
+    - llm_judge: { "type":"llm_judge", "value":"criteria" } -- open-ended. Use sparingly.
+
+    Aim for deterministic verifications (exit_code, file_exists, file_contains) wherever possible.
+    Emit the course via the emit_course tool. Do not include any prose outside the tool call.
+    """
+
+    static var emitCourseToolSchema: [String: Any] {
+        let verifySchema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "type": ["type": "string", "enum": ["exit_code", "stdout_regex", "file_exists", "file_contains", "llm_judge"]],
+                "value": ["type": "string"],
+                "path": ["type": "string"],
+                "exit_code": ["type": "integer"]
+            ],
+            "required": ["type"]
+        ]
+        let challengeSchema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "task": ["type": "string"],
+                "starter_state": ["type": "string"],
+                "verify": verifySchema
+            ],
+            "required": ["task", "verify"]
+        ]
+        let lessonSchema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "title": ["type": "string"],
+                "concept_md": ["type": "string"],
+                "demos": [
+                    "type": "array",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "command": ["type": "string"],
+                            "expected_output": ["type": "string"],
+                            "explanation": ["type": "string"]
+                        ],
+                        "required": ["command", "expected_output", "explanation"]
+                    ]
+                ],
+                "practice_prompt": ["type": "string"],
+                "challenge": challengeSchema
+            ],
+            "required": ["title", "concept_md", "demos", "practice_prompt", "challenge"]
+        ]
+        return [
+            "type": "object",
+            "properties": [
+                "title": ["type": "string"],
+                "description": ["type": "string"],
+                "estimated_minutes": ["type": "integer"],
+                "environment": ["type": "string", "enum": ["macos", "linux"]],
+                "prerequisites": ["type": "array", "items": ["type": "string"]],
+                "lessons": ["type": "array", "items": lessonSchema, "minItems": 3, "maxItems": 5],
+                "final_challenge": challengeSchema
+            ],
+            "required": ["title", "description", "estimated_minutes", "environment", "prerequisites", "lessons"]
+        ]
+    }
+
+    func generateCourse(subject: String, model: String = defaultModel) async throws -> CourseDraft {
+        guard let apiKey = Keychain.get(KeychainKeys.anthropicAPIKey), !apiKey.isEmpty else {
+            throw ClaudeError.missingAPIKey
+        }
+
+        let tool: [String: Any] = [
+            "name": "emit_course",
+            "description": "Emit a structured course design for the requested subject.",
+            "input_schema": Self.emitCourseToolSchema
+        ]
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 4096,
+            "system": Self.courseModeSystemPrompt,
+            "tools": [tool],
+            "tool_choice": ["type": "tool", "name": "emit_course"],
+            "messages": [
+                ["role": "user", "content": "Design a course on: \(subject)"]
+            ]
+        ]
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ClaudeError.httpError(0, "no response")
+        }
+        if http.statusCode != 200 {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw ClaudeError.httpError(http.statusCode, body)
+        }
+
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = obj["content"] as? [[String: Any]] else {
+            throw ClaudeError.decodingError
+        }
+
+        let toolBlock = content.first(where: { ($0["type"] as? String) == "tool_use" })
+        guard let block = toolBlock, let input = block["input"] as? [String: Any] else {
+            throw ClaudeError.noToolUseInResponse
+        }
+
+        let inputData = try JSONSerialization.data(withJSONObject: input)
+        do {
+            return try JSONDecoder().decode(CourseDraft.self, from: inputData)
+        } catch {
+            throw ClaudeError.invalidCourseSchema(String(describing: error))
         }
     }
 }

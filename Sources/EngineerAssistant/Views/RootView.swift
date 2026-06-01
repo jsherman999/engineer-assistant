@@ -5,24 +5,30 @@ struct RootView: View {
     @State private var showingSettings = false
 
     var body: some View {
-        ChatView()
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                }
+        Group {
+            if let course = session.activeCourse {
+                CoursePlayerView(course: course)
+            } else {
+                ChatView()
             }
-            .sheet(isPresented: $showingSettings) {
-                SettingsView()
-                    .environmentObject(session)
-            }
-            .onAppear {
-                if !session.apiKeyConfigured {
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     showingSettings = true
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
                 }
             }
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
+                .environmentObject(session)
+        }
+        .onAppear {
+            if !session.apiKeyConfigured {
+                showingSettings = true
+            }
+        }
     }
 }

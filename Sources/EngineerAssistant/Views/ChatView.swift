@@ -81,7 +81,7 @@ struct ChatView: View {
         }
         switch session.currentMode {
         case .ask: return "Ask anything about MacOS, Linux, sysadmin, or coding…"
-        case .course: return "What topic do you want a course on? (Phase 2)"
+        case .course: return "What topic do you want a course on?"
         }
     }
 
