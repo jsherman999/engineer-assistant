@@ -16,7 +16,13 @@ final class AppSession: ObservableObject {
     @Published var isChecking: Bool = false
     @Published var challengeOutcome: VerifyOutcome? = nil
     @Published var hintRevealed: Bool = false
+    @Published var hintText: String? = nil
+    @Published var hintLoading: Bool = false
     @Published var containerRuntime: ContainerRuntime? = nil
+    @Published var isRegenerating: Bool = false
+    @Published var showLessonChat: Bool = false
+    @Published var lessonChat: [ChatMessage] = []
+    @Published var lessonChatSending: Bool = false
 
     private let claude = ClaudeClient()
     private let courseGenerator = CourseGenerator()
@@ -193,7 +199,11 @@ final class AppSession: ObservableObject {
     private func resetChallengeState() {
         challengeOutcome = nil
         hintRevealed = false
+        hintText = nil
+        hintLoading = false
         isChecking = false
+        lessonChat = []
+        showLessonChat = false
     }
 
     func checkCurrentChallenge() {
@@ -232,10 +242,94 @@ final class AppSession: ObservableObject {
     }
 
     func revealHint() {
-        hintRevealed = true
         guard let course = activeCourse, let sessionId, currentLessonIdx < course.lessons.count else { return }
+        hintRevealed = true
+        hintLoading = true
+        hintText = nil
+        let lesson = course.lessons[currentLessonIdx]
         let idx = currentLessonIdx
-        Task { await logHintUsed(course: course, idx: idx, sessionId: sessionId) }
+        let transcript = terminal?.transcript ?? ""
+        Task {
+            var text: String
+            do {
+                text = try await claude.hint(lessonTitle: lesson.title, concept: lesson.conceptMd, task: lesson.challenge.task, transcript: transcript)
+            } catch {
+                text = Self.fallbackHint(for: lesson.challenge)
+            }
+            hintText = text
+            hintLoading = false
+            await logHintUsed(course: course, idx: idx, text: text, sessionId: sessionId)
+        }
+    }
+
+    static func fallbackHint(for challenge: Challenge) -> String {
+        switch challenge.verify.type {
+        case .exitCode:
+            return "Your last command needs to finish with exit code \(challenge.verify.exitCode ?? 0). Check its output for errors."
+        case .stdoutRegex:
+            return "Run a command whose output matches /\(challenge.verify.value ?? "")/."
+        case .fileExists:
+            return "Create the file at \(challenge.verify.path ?? "the given path") inside this sandbox."
+        case .fileContains:
+            return "Make sure \(challenge.verify.path ?? "the file") contains \"\(challenge.verify.value ?? "")\"."
+        case .llmJudge:
+            return "Re-read the task and make sure your shell session clearly accomplishes it."
+        }
+    }
+
+    func sendLessonQuestion(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !lessonChatSending,
+              let course = activeCourse, let sessionId,
+              currentLessonIdx < course.lessons.count else { return }
+        let idx = currentLessonIdx
+        let lesson = course.lessons[idx]
+
+        lessonChat.append(ChatMessage(role: .user, mode: .ask, text: trimmed))
+        let assistant = ChatMessage(role: .assistant, mode: .ask, text: "")
+        lessonChat.append(assistant)
+        let assistantId = assistant.id
+        lessonChatSending = true
+
+        let preamble = "Lesson: \(lesson.title)\nConcept: \(lesson.conceptMd)\nChallenge: \(lesson.challenge.task)"
+        let history = Array(lessonChat.dropLast())
+
+        Task {
+            await logChatEvent(.chatUser, mode: .ask, text: trimmed, sessionId: sessionId, courseId: course.id, lessonIdx: idx)
+            do {
+                for try await chunk in claude.streamAskResponse(history: history, contextPreamble: preamble) {
+                    appendLessonChunk(to: assistantId, text: chunk.text)
+                }
+                let finalText = lessonChat.first(where: { $0.id == assistantId })?.text ?? ""
+                await logChatEvent(.chatAssistant, mode: .ask, text: finalText, sessionId: sessionId, courseId: course.id, lessonIdx: idx)
+            } catch {
+                appendLessonChunk(to: assistantId, text: "\n\n_Error: \(error.localizedDescription)_")
+            }
+            lessonChatSending = false
+        }
+    }
+
+    private func appendLessonChunk(to id: UUID, text: String) {
+        guard let idx = lessonChat.firstIndex(where: { $0.id == id }) else { return }
+        lessonChat[idx].text += text
+    }
+
+    func regenerateActiveCourse() {
+        guard let course = activeCourse, let sessionId, !isRegenerating else { return }
+        isRegenerating = true
+        let subject = course.subject
+        Task {
+            do {
+                let result = try await courseGenerator.generate(subject: subject, forceRefresh: true)
+                await logCourseGenerated(course: result.course, wasCached: false, sessionId: sessionId)
+                courses = courseStore.listAll()
+                isRegenerating = false
+                openCourse(result.course)
+            } catch {
+                lastError = "Regenerate failed: \(error.localizedDescription)"
+                isRegenerating = false
+            }
+        }
     }
 
     private func appendChunk(to id: UUID, text: String) {
@@ -243,13 +337,13 @@ final class AppSession: ObservableObject {
         messages[idx].text += text
     }
 
-    private func logChatEvent(_ type: EventType, mode: ChatMode, text: String, sessionId: String, courseId: String?) async {
+    private func logChatEvent(_ type: EventType, mode: ChatMode, text: String, sessionId: String, courseId: String?, lessonIdx: Int? = nil) async {
         let event = LogEvent(
             sessionId: sessionId,
             timestamp: Date(),
             type: type,
             courseId: courseId,
-            lessonIdx: nil,
+            lessonIdx: lessonIdx,
             payload: [
                 "text": AnyCodable(text),
                 "mode": AnyCodable(mode.rawValue)
@@ -317,14 +411,14 @@ final class AppSession: ObservableObject {
         try? await eventStore.append(event)
     }
 
-    private func logHintUsed(course: Course, idx: Int, sessionId: String) async {
+    private func logHintUsed(course: Course, idx: Int, text: String, sessionId: String) async {
         let event = LogEvent(
             sessionId: sessionId,
             timestamp: Date(),
             type: .hintUsed,
             courseId: course.id,
             lessonIdx: idx,
-            payload: ["hint_text": AnyCodable("revealed")]
+            payload: ["hint_text": AnyCodable(text)]
         )
         try? await eventStore.append(event)
     }

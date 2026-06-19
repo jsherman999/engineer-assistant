@@ -10,6 +10,16 @@ struct CoursePlayerView: View {
     }
 
     var body: some View {
+        HStack(spacing: 0) {
+            mainColumn
+            if session.showLessonChat {
+                Divider()
+                LessonChatSidebar().frame(width: 320)
+            }
+        }
+    }
+
+    private var mainColumn: some View {
         VStack(spacing: 0) {
             header
             Divider()
@@ -65,6 +75,17 @@ struct CoursePlayerView: View {
                     Text(course.description).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button {
+                    session.regenerateActiveCourse()
+                } label: {
+                    if session.isRegenerating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Regenerate", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .help("Discard the cached course and generate a fresh one for this subject")
+                .disabled(session.isRegenerating)
                 envBadge
             }
             HStack(spacing: 12) {
@@ -176,29 +197,22 @@ struct CoursePlayerView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 if !outcome.passed {
                     if session.hintRevealed {
-                        Text("Hint: \(hintText(challenge))")
-                            .font(.caption).foregroundStyle(.blue).italic()
+                        if session.hintLoading {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Thinking of a hint…").font(.caption).foregroundStyle(.secondary)
+                            }
+                        } else if let hint = session.hintText {
+                            Text("Hint: \(hint)")
+                                .font(.caption).foregroundStyle(.blue).italic()
+                                .textSelection(.enabled)
+                        }
                     } else {
                         Button("Show hint") { session.revealHint() }
                             .font(.caption).buttonStyle(.borderless)
                     }
                 }
             }
-        }
-    }
-
-    private func hintText(_ challenge: Challenge) -> String {
-        switch challenge.verify.type {
-        case .exitCode:
-            return "Your last command needs to finish with exit code \(challenge.verify.exitCode ?? 0). Check its output for errors."
-        case .stdoutRegex:
-            return "Run a command whose output matches /\(challenge.verify.value ?? "")/."
-        case .fileExists:
-            return "Create the file at \(challenge.verify.path ?? "the given path") inside this sandbox."
-        case .fileContains:
-            return "Make sure \(challenge.verify.path ?? "the file") contains \"\(challenge.verify.value ?? "")\"."
-        case .llmJudge:
-            return "Re-read the task and make sure your shell session clearly accomplishes it."
         }
     }
 
@@ -229,6 +243,13 @@ struct CoursePlayerView: View {
                 Label("Exit Course", systemImage: "xmark")
             }
 
+            Button {
+                session.showLessonChat.toggle()
+            } label: {
+                Label("Ask Claude", systemImage: "bubble.left.and.text.bubble.right")
+            }
+            .help("Ask Claude a question about this lesson")
+
             Spacer()
 
             Button {
@@ -239,5 +260,83 @@ struct CoursePlayerView: View {
             .disabled(session.currentLessonIdx >= course.lessons.count - 1)
         }
         .padding(12)
+    }
+}
+
+/// Lesson-scoped chat: questions are answered with the current lesson as context and
+/// logged with `course_id` + `lesson_idx` so the dashboard can separate them from
+/// free-form Ask Mode.
+private struct LessonChatSidebar: View {
+    @EnvironmentObject var session: AppSession
+    @State private var input: String = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Ask Claude").font(.headline)
+                Spacer()
+                Button {
+                    session.showLessonChat = false
+                } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless)
+            }
+            .padding(10)
+            Divider()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        if session.lessonChat.isEmpty {
+                            Text("Ask anything about this lesson — Claude sees the concept and challenge.")
+                                .font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+                        }
+                        ForEach(session.lessonChat) { msg in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(msg.role == .user ? "You" : "Claude")
+                                    .font(.caption2.bold()).foregroundStyle(.secondary)
+                                Text(msg.text.isEmpty ? "…" : msg.text)
+                                    .font(.callout).textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .background(msg.role == .user ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .id(msg.id)
+                        }
+                    }
+                    .padding(10)
+                }
+                .onChange(of: session.lessonChat.last?.text) { _, _ in
+                    if let last = session.lessonChat.last {
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
+                }
+            }
+
+            Divider()
+            HStack(spacing: 6) {
+                TextField("Question about this lesson…", text: $input, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...4)
+                    .disabled(session.lessonChatSending || !session.apiKeyConfigured)
+                    .onSubmit(sendQuestion)
+                Button(action: sendQuestion) {
+                    if session.lessonChatSending {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                    }
+                }
+                .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.lessonChatSending || !session.apiKeyConfigured)
+            }
+            .padding(8)
+        }
+        .background(.regularMaterial)
+    }
+
+    private func sendQuestion() {
+        let text = input
+        input = ""
+        session.sendLessonQuestion(text)
     }
 }

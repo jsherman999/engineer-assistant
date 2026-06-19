@@ -46,6 +46,7 @@ final class ClaudeClient {
 
     func streamAskResponse(
         history: [ChatMessage],
+        contextPreamble: String? = nil,
         model: String = defaultModel
     ) -> AsyncThrowingStream<ClaudeStreamChunk, Error> {
         AsyncThrowingStream { continuation in
@@ -59,10 +60,13 @@ final class ClaudeClient {
                         ClaudeMessage(role: $0.role.rawValue, content: $0.text)
                     }
 
+                    let system = Self.askModeSystemPrompt + (contextPreamble.map {
+                        "\n\nThe student is currently in a lesson. Use this context when relevant:\n\($0)"
+                    } ?? "")
                     let body: [String: Any] = [
                         "model": model,
                         "max_tokens": 1024,
-                        "system": Self.askModeSystemPrompt,
+                        "system": system,
                         "stream": true,
                         "messages": messages.map { ["role": $0.role, "content": $0.content] }
                     ]
@@ -285,5 +289,54 @@ final class ClaudeClient {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let passed = trimmed.uppercased().hasPrefix("PASS")
         return (passed, trimmed)
+    }
+
+    /// A short, contextual hint for a stuck student that nudges without revealing the answer.
+    func hint(lessonTitle: String, concept: String, task: String, transcript: String, model: String = defaultModel) async throws -> String {
+        guard let apiKey = Keychain.get(KeychainKeys.anthropicAPIKey), !apiKey.isEmpty else {
+            throw ClaudeError.missingAPIKey
+        }
+
+        let system = """
+        You are a patient tutor for a high-school student stuck on a shell challenge. Give ONE short, \
+        encouraging hint (1–2 sentences) that nudges them toward the next step. Do NOT give the full \
+        command or the complete answer — point at the idea or the tool to try.
+        """
+        let userContent = """
+        Lesson: \(lessonTitle)
+        Concept: \(concept)
+        Challenge: \(task)
+
+        What the student has done so far in the shell:
+        \(transcript.isEmpty ? "(nothing yet)" : transcript)
+        """
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 200,
+            "system": system,
+            "messages": [["role": "user", "content": userContent]]
+        ]
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ClaudeError.httpError(0, "no response")
+        }
+        if http.statusCode != 200 {
+            throw ClaudeError.httpError(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = obj["content"] as? [[String: Any]],
+              let text = content.first(where: { ($0["type"] as? String) == "text" })?["text"] as? String else {
+            throw ClaudeError.decodingError
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
