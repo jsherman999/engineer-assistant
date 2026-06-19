@@ -13,11 +13,15 @@ final class AppSession: ObservableObject {
     @Published var currentLessonIdx: Int = 0
     @Published var courses: [Course] = []
     @Published var terminal: MacOSTerminalController? = nil
+    @Published var isChecking: Bool = false
+    @Published var challengeOutcome: VerifyOutcome? = nil
+    @Published var hintRevealed: Bool = false
 
     private let claude = ClaudeClient()
     private let courseGenerator = CourseGenerator()
     private let courseStore: CourseStore = FileCourseStore()
     private let eventStore: EventStore = JSONLEventStore()
+    private lazy var verifier = Verifier(claude: claude)
 
     func start() async {
         refreshAPIKeyStatus()
@@ -105,6 +109,7 @@ final class AppSession: ObservableObject {
     func openCourse(_ course: Course) {
         activeCourse = course
         currentLessonIdx = 0
+        resetChallengeState()
         startTerminalIfSupported(for: course)
         Task {
             guard let sessionId else { return }
@@ -150,6 +155,7 @@ final class AppSession: ObservableObject {
         let prevIdx = currentLessonIdx
         let nextIdx = currentLessonIdx + 1
         currentLessonIdx = nextIdx
+        resetChallengeState()
         Task {
             guard let sessionId else { return }
             await logLessonComplete(course: course, idx: prevIdx, sessionId: sessionId, finished: true)
@@ -160,6 +166,55 @@ final class AppSession: ObservableObject {
     func previousLesson() {
         guard currentLessonIdx > 0 else { return }
         currentLessonIdx -= 1
+        resetChallengeState()
+    }
+
+    private func resetChallengeState() {
+        challengeOutcome = nil
+        hintRevealed = false
+        isChecking = false
+    }
+
+    func checkCurrentChallenge() {
+        guard let course = activeCourse, let sessionId,
+              currentLessonIdx < course.lessons.count else { return }
+        let challenge = course.lessons[currentLessonIdx].challenge
+        guard let terminal else {
+            challengeOutcome = VerifyOutcome(passed: false, detail: "Start the sandbox shell first.")
+            return
+        }
+
+        isChecking = true
+        challengeOutcome = nil
+        hintRevealed = false
+
+        let context = VerifyContext(
+            lastExitCode: terminal.lastExitCode,
+            lastStdout: terminal.lastStdout,
+            sandboxDir: terminal.workingDirectory,
+            transcript: terminal.transcript
+        )
+        let command = terminal.lastCommand ?? ""
+        let idx = currentLessonIdx
+
+        Task {
+            await logChallengeAttempt(course: course, idx: idx, command: command, sessionId: sessionId)
+            let outcome = await verifier.verify(challenge.verify, context: context)
+            challengeOutcome = outcome
+            isChecking = false
+            if outcome.passed {
+                await logChallengeResult(.challengePass, course: course, idx: idx, verify: challenge.verify, detail: outcome.detail, sessionId: sessionId)
+            } else {
+                await logChallengeResult(.challengeFail, course: course, idx: idx, verify: challenge.verify, detail: outcome.detail, sessionId: sessionId)
+            }
+        }
+    }
+
+    func revealHint() {
+        hintRevealed = true
+        guard let course = activeCourse, let sessionId, currentLessonIdx < course.lessons.count else { return }
+        let idx = currentLessonIdx
+        Task { await logHintUsed(course: course, idx: idx, sessionId: sessionId) }
     }
 
     private func appendChunk(to id: UUID, text: String) {
@@ -209,6 +264,46 @@ final class AppSession: ObservableObject {
             courseId: course.id,
             lessonIdx: idx,
             payload: ["lesson_title": AnyCodable(course.lessons[idx].title)]
+        )
+        try? await eventStore.append(event)
+    }
+
+    private func logChallengeAttempt(course: Course, idx: Int, command: String, sessionId: String) async {
+        let event = LogEvent(
+            sessionId: sessionId,
+            timestamp: Date(),
+            type: .challengeAttempt,
+            courseId: course.id,
+            lessonIdx: idx,
+            payload: ["command": AnyCodable(command)]
+        )
+        try? await eventStore.append(event)
+    }
+
+    private func logChallengeResult(_ type: EventType, course: Course, idx: Int, verify: VerifyCheck, detail: String, sessionId: String) async {
+        let detailKey = type == .challengePass ? "evidence" : "reason"
+        let event = LogEvent(
+            sessionId: sessionId,
+            timestamp: Date(),
+            type: type,
+            courseId: course.id,
+            lessonIdx: idx,
+            payload: [
+                "verify_type": AnyCodable(verify.type.rawValue),
+                detailKey: AnyCodable(detail)
+            ]
+        )
+        try? await eventStore.append(event)
+    }
+
+    private func logHintUsed(course: Course, idx: Int, sessionId: String) async {
+        let event = LogEvent(
+            sessionId: sessionId,
+            timestamp: Date(),
+            type: .hintUsed,
+            courseId: course.id,
+            lessonIdx: idx,
+            payload: ["hint_text": AnyCodable("revealed")]
         )
         try? await eventStore.append(event)
     }

@@ -1,28 +1,31 @@
 import Foundation
-import SwiftUI
+import SwiftTerm
 
-struct TerminalEntry: Identifiable, Equatable {
-    let id = UUID()
-    let kind: Kind
-    let text: String
-    enum Kind { case stdin, stdout, stderr, info }
-}
-
+/// Owns the sandboxed PTY-backed terminal view, tees its I/O into the event log,
+/// and tracks the last command / exit code / stdout for challenge verification.
 @MainActor
 final class MacOSTerminalController: ObservableObject {
-    @Published private(set) var entries: [TerminalEntry] = []
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var statusMessage: String? = nil
+    @Published private(set) var lastExitCode: Int? = nil
 
     let workingDirectory: URL
     let courseId: String
+    let view: SandboxTerminalProcessView
+
     private let sessionId: String
     private let eventStore: EventStore
-    private var process: Process?
-    private var stdinPipe: Pipe?
-    private var stdoutPipe: Pipe?
-    private var stderrPipe: Pipe?
+    private var parser = ShellTeeParser()
     private var profileURL: URL?
+
+    /// Stdout of the most recently completed command (marker-stripped). Used by the verifier.
+    private(set) var lastStdout: String = ""
+    /// The most recent command the student ran (from the preexec marker).
+    private(set) var lastCommand: String? = nil
+    /// Rolling transcript of rendered output, for the `llm_judge` verifier.
+    private(set) var transcript: String = ""
+
+    private static let transcriptCap = 20_000
 
     init(courseId: String, sessionId: String, eventStore: EventStore) throws {
         self.courseId = courseId
@@ -31,158 +34,127 @@ final class MacOSTerminalController: ObservableObject {
         let dir = AppPaths.sandboxesDir.appendingPathComponent(courseId, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.workingDirectory = dir
+        self.view = SandboxTerminalProcessView(frame: CGRect(x: 0, y: 0, width: 640, height: 280))
+        self.view.coordinator = self
     }
 
     func start() throws {
-        guard process == nil else { return }
+        guard !isRunning else { return }
         let profile = SandboxProfile.macOSProfile(sandboxDir: workingDirectory.path)
         let profileURL = workingDirectory.appendingPathComponent(".sandbox.sb")
         try profile.write(to: profileURL, atomically: true, encoding: .utf8)
         self.profileURL = profileURL
+        try Self.writeZshrc(to: workingDirectory)
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
-        proc.arguments = ["-f", profileURL.path, "/bin/zsh"]
-        proc.currentDirectoryURL = workingDirectory
-        proc.environment = [
-            "HOME": workingDirectory.path,
-            "ZDOTDIR": workingDirectory.path,
-            "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-            "TERM": "dumb",
-            "PS1": "$ ",
-            "LANG": "en_US.UTF-8"
-        ]
-
-        let stdin = Pipe()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        proc.standardInput = stdin
-        proc.standardOutput = stdout
-        proc.standardError = stderr
-
-        let courseId = self.courseId
-        let sessionId = self.sessionId
-        let store = self.eventStore
-
-        stdout.fileHandleForReading.readabilityHandler = { [weak self] fh in
-            let data = fh.availableData
-            guard !data.isEmpty else { return }
-            Task { @MainActor [weak self] in
-                self?.handleOutput(data, kind: .stdout)
-            }
-            Task.detached {
-                await Self.log(.shellStdout, data: data, courseId: courseId, sessionId: sessionId, store: store)
-            }
-        }
-        stderr.fileHandleForReading.readabilityHandler = { [weak self] fh in
-            let data = fh.availableData
-            guard !data.isEmpty else { return }
-            Task { @MainActor [weak self] in
-                self?.handleOutput(data, kind: .stderr)
-            }
-            Task.detached {
-                await Self.log(.shellStderr, data: data, courseId: courseId, sessionId: sessionId, store: store)
-            }
-        }
-
-        proc.terminationHandler = { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.handleTermination()
-            }
-        }
-
-        try proc.run()
-
-        process = proc
-        stdinPipe = stdin
-        stdoutPipe = stdout
-        stderrPipe = stderr
+        view.startProcess(
+            executable: "/usr/bin/sandbox-exec",
+            args: ["-f", profileURL.path, "/bin/zsh", "-i"],
+            environment: [
+                "HOME=\(workingDirectory.path)",
+                "ZDOTDIR=\(workingDirectory.path)",
+                "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                "TERM=xterm-256color",
+                "LANG=en_US.UTF-8"
+            ],
+            currentDirectory: workingDirectory.path
+        )
         isRunning = true
-        statusMessage = "Sandboxed zsh running at \(workingDirectory.lastPathComponent)/  (writes confined here; network blocked)"
-        appendInfo("Welcome. This shell is sandboxed: you can read most system files, but you can only write inside this directory. Network is blocked.")
-    }
-
-    func send(_ command: String) {
-        guard let stdin = stdinPipe else { return }
-        let line = command + "\n"
-        guard let data = line.data(using: .utf8) else { return }
-        do {
-            try stdin.fileHandleForWriting.write(contentsOf: data)
-        } catch {
-            appendInfo("Failed to send command: \(error.localizedDescription)")
-            return
-        }
-        appendInput(command)
-        let courseId = self.courseId
-        let sessionId = self.sessionId
-        let store = self.eventStore
-        Task.detached {
-            await Self.log(.shellStdin, data: data, courseId: courseId, sessionId: sessionId, store: store)
-        }
-    }
-
-    func reset() {
-        stop()
-        do {
-            let contents = try FileManager.default.contentsOfDirectory(at: workingDirectory, includingPropertiesForKeys: nil)
-            for url in contents {
-                try? FileManager.default.removeItem(at: url)
-            }
-            try start()
-            entries.removeAll()
-            appendInfo("Sandbox reset.")
-        } catch {
-            statusMessage = "Reset failed: \(error.localizedDescription)"
-        }
+        statusMessage = "Sandboxed zsh — writes confined to \(workingDirectory.lastPathComponent)/, network blocked."
     }
 
     func stop() {
-        stdoutPipe?.fileHandleForReading.readabilityHandler = nil
-        stderrPipe?.fileHandleForReading.readabilityHandler = nil
-        process?.terminationHandler = nil
-        process?.terminate()
-        process = nil
-        stdinPipe = nil
-        stdoutPipe = nil
-        stderrPipe = nil
+        view.terminate()
         if let url = profileURL { try? FileManager.default.removeItem(at: url) }
         profileURL = nil
         isRunning = false
         statusMessage = "Shell stopped."
     }
 
-    private func handleOutput(_ data: Data, kind: TerminalEntry.Kind) {
-        let text = String(data: data, encoding: .utf8) ?? ""
-        if text.isEmpty { return }
-        entries.append(TerminalEntry(kind: kind, text: text))
+    func reset() {
+        view.terminate()
+        let contents = (try? FileManager.default.contentsOfDirectory(at: workingDirectory, includingPropertiesForKeys: nil)) ?? []
+        for url in contents { try? FileManager.default.removeItem(at: url) }
+        parser = ShellTeeParser()
+        lastExitCode = nil
+        lastStdout = ""
+        lastCommand = nil
+        transcript = ""
+        view.getTerminal().resetToInitialState()
+        isRunning = false
+        do {
+            try start()
+        } catch {
+            statusMessage = "Reset failed: \(error.localizedDescription)"
+        }
     }
 
-    private func handleTermination() {
+    // MARK: - Tee callbacks (invoked on the main queue by SandboxTerminalProcessView)
+
+    func ingestInput(_ data: ArraySlice<UInt8>) {
+        log(.shellStdin, data: Data(data))
+    }
+
+    /// Parses PTY output, records exit code / stdout, logs the clean text, and returns
+    /// the marker-stripped bytes to render.
+    func ingestOutput(_ data: ArraySlice<UInt8>) -> [UInt8] {
+        let parsed = parser.consume(data)
+        if !parsed.display.isEmpty {
+            let text = String(decoding: parsed.display, as: UTF8.self)
+            transcript += text
+            if transcript.count > Self.transcriptCap {
+                transcript = String(transcript.suffix(Self.transcriptCap))
+            }
+            log(.shellStdout, data: Data(parsed.display))
+        }
+        for event in parsed.events {
+            switch event {
+            case .started(let cmd):
+                lastCommand = cmd
+            case .finished(let code, let output):
+                lastExitCode = code
+                lastStdout = output
+            }
+        }
+        return parsed.display
+    }
+
+    func handleProcessTerminated() {
+        // Ignore stale terminations from a process we already replaced (e.g. during reset).
+        guard !(view.process?.running ?? false) else { return }
         isRunning = false
         statusMessage = "Shell exited."
-        appendInfo("Shell exited.")
     }
 
-    private func appendInput(_ command: String) {
-        entries.append(TerminalEntry(kind: .stdin, text: command))
+    // MARK: - Helpers
+
+    private func log(_ type: EventType, data: Data) {
+        let courseId = self.courseId
+        let sessionId = self.sessionId
+        let store = self.eventStore
+        Task.detached {
+            let event = LogEvent(
+                sessionId: sessionId,
+                timestamp: Date(),
+                type: type,
+                courseId: courseId,
+                lessonIdx: nil,
+                payload: [
+                    "bytes_b64": AnyCodable(data.base64EncodedString()),
+                    "text": AnyCodable(String(decoding: data, as: UTF8.self))
+                ]
+            )
+            try? await store.append(event)
+        }
     }
 
-    private func appendInfo(_ text: String) {
-        entries.append(TerminalEntry(kind: .info, text: text))
-    }
-
-    private static func log(_ type: EventType, data: Data, courseId: String, sessionId: String, store: EventStore) async {
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: type,
-            courseId: courseId,
-            lessonIdx: nil,
-            payload: [
-                "bytes_b64": AnyCodable(data.base64EncodedString()),
-                "text": AnyCodable(String(data: data, encoding: .utf8) ?? "")
-            ]
-        )
-        try? await store.append(event)
+    /// Writes a `.zshrc` into the sandbox (its HOME/ZDOTDIR) that defines the prompt and
+    /// the preexec/precmd hooks emitting the markers `ShellTeeParser` consumes.
+    private static func writeZshrc(to dir: URL) throws {
+        let zshrc = """
+        PROMPT='%~ %# '
+        preexec() { printf '\\001EAC:%s\\001' "$1" }
+        precmd()  { printf '\\001EAX:%d\\001' $? }
+        """
+        try zshrc.write(to: dir.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
     }
 }

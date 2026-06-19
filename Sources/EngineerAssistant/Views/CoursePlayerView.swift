@@ -39,7 +39,7 @@ struct CoursePlayerView: View {
     private var terminalPanel: some View {
         if let terminal = session.terminal {
             Divider()
-            TerminalView(controller: terminal)
+            SandboxTerminalView(controller: terminal)
                 .frame(height: 280)
         } else if course.environment == .linux {
             Divider()
@@ -139,15 +139,67 @@ struct CoursePlayerView: View {
     }
 
     private func challengeBlock(_ challenge: Challenge) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(challenge.task).textSelection(.enabled)
             if let starter = challenge.starterState, !starter.isEmpty {
                 Text("Starter state: \(starter)").font(.caption).foregroundStyle(.secondary)
             }
             Text("Verify: \(verifyDescription(challenge.verify))")
                 .font(.caption).foregroundStyle(.secondary).italic()
-            Text("Auto-verification coming in Phase 4.")
-                .font(.caption).foregroundStyle(.tertiary).italic()
+
+            if course.environment == .linux {
+                Text("Linux challenges can be checked once the container shell lands (Phase 5).")
+                    .font(.caption).foregroundStyle(.tertiary).italic()
+            } else {
+                HStack(spacing: 10) {
+                    Button {
+                        session.checkCurrentChallenge()
+                    } label: {
+                        if session.isChecking {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Check Challenge", systemImage: "checkmark.circle")
+                        }
+                    }
+                    .disabled(session.isChecking || session.terminal == nil)
+
+                    if let outcome = session.challengeOutcome {
+                        Label(outcome.passed ? "Passed" : "Not yet",
+                              systemImage: outcome.passed ? "checkmark.seal.fill" : "xmark.octagon.fill")
+                            .foregroundStyle(outcome.passed ? .green : .orange)
+                            .font(.callout)
+                    }
+                }
+
+                if let outcome = session.challengeOutcome {
+                    Text(outcome.detail)
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !outcome.passed {
+                        if session.hintRevealed {
+                            Text("Hint: \(hintText(challenge))")
+                                .font(.caption).foregroundStyle(.blue).italic()
+                        } else {
+                            Button("Show hint") { session.revealHint() }
+                                .font(.caption).buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func hintText(_ challenge: Challenge) -> String {
+        switch challenge.verify.type {
+        case .exitCode:
+            return "Your last command needs to finish with exit code \(challenge.verify.exitCode ?? 0). Check its output for errors."
+        case .stdoutRegex:
+            return "Run a command whose output matches /\(challenge.verify.value ?? "")/."
+        case .fileExists:
+            return "Create the file at \(challenge.verify.path ?? "the given path") inside this sandbox."
+        case .fileContains:
+            return "Make sure \(challenge.verify.path ?? "the file") contains \"\(challenge.verify.value ?? "")\"."
+        case .llmJudge:
+            return "Re-read the task and make sure your shell session clearly accomplishes it."
         }
     }
 

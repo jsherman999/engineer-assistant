@@ -240,4 +240,50 @@ final class ClaudeClient {
             throw ClaudeError.invalidCourseSchema(String(describing: error))
         }
     }
+
+    /// Grades an open-ended challenge from a shell transcript. Returns (passed, reason).
+    func judge(criteria: String, transcript: String, model: String = defaultModel) async throws -> (Bool, String) {
+        guard let apiKey = Keychain.get(KeychainKeys.anthropicAPIKey), !apiKey.isEmpty else {
+            throw ClaudeError.missingAPIKey
+        }
+
+        let system = """
+        You grade a high-school student's shell exercise. Given success criteria and a transcript of \
+        their session, decide whether they met the criteria. Reply with exactly one line, either \
+        "PASS: <short reason>" or "FAIL: <short reason>". Be lenient about style, strict about whether \
+        the goal was actually achieved.
+        """
+        let userContent = "Success criteria:\n\(criteria)\n\nTranscript:\n\(transcript)"
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 256,
+            "system": system,
+            "messages": [["role": "user", "content": userContent]]
+        ]
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ClaudeError.httpError(0, "no response")
+        }
+        if http.statusCode != 200 {
+            throw ClaudeError.httpError(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = obj["content"] as? [[String: Any]],
+              let text = content.first(where: { ($0["type"] as? String) == "text" })?["text"] as? String else {
+            throw ClaudeError.decodingError
+        }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let passed = trimmed.uppercased().hasPrefix("PASS")
+        return (passed, trimmed)
+    }
 }

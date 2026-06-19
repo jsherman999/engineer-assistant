@@ -7,9 +7,15 @@ let package = Package(
     products: [
         .executable(name: "EngineerAssistant", targets: ["EngineerAssistant"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.13.0")
+    ],
     targets: [
         .executableTarget(
             name: "EngineerAssistant",
+            dependencies: [
+                .product(name: "SwiftTerm", package: "SwiftTerm")
+            ],
             path: "Sources/EngineerAssistant"
         ),
         .testTarget(
