@@ -2,7 +2,7 @@ import SwiftUI
 
 /// SwiftUI host for the sandboxed PTY terminal, with a status bar and Reset control.
 struct SandboxTerminalView: View {
-    @ObservedObject var controller: MacOSTerminalController
+    @ObservedObject var controller: SandboxTerminalController
 
     var body: some View {
         VStack(spacing: 0) {

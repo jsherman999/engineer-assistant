@@ -3,8 +3,8 @@ import Foundation
 struct VerifyContext {
     let lastExitCode: Int?
     let lastStdout: String
-    let sandboxDir: URL
     let transcript: String
+    let fileSystem: SandboxFileSystem
 }
 
 struct VerifyOutcome: Equatable {
@@ -38,8 +38,7 @@ struct Verifier {
             guard let path = check.path else {
                 return .init(passed: false, detail: "Challenge is missing a path to check.")
             }
-            let url = Self.resolve(path, sandbox: context.sandboxDir)
-            return FileManager.default.fileExists(atPath: url.path)
+            return await context.fileSystem.fileExists(path)
                 ? .init(passed: true, detail: "Found \(path).")
                 : .init(passed: false, detail: "\(path) does not exist yet.")
 
@@ -47,8 +46,7 @@ struct Verifier {
             guard let path = check.path else {
                 return .init(passed: false, detail: "Challenge is missing a path to check.")
             }
-            let url = Self.resolve(path, sandbox: context.sandboxDir)
-            guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+            guard let contents = await context.fileSystem.readFile(path) else {
                 return .init(passed: false, detail: "Could not read \(path).")
             }
             let needle = check.value ?? ""
@@ -69,13 +67,6 @@ struct Verifier {
                 return .init(passed: false, detail: "Judge failed: \(error.localizedDescription)")
             }
         }
-    }
-
-    static func resolve(_ path: String, sandbox: URL) -> URL {
-        if path == "~" { return sandbox }
-        if path.hasPrefix("~/") { return sandbox.appendingPathComponent(String(path.dropFirst(2))) }
-        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
-        return sandbox.appendingPathComponent(path)
     }
 
     static func regexMatches(_ pattern: String, _ text: String) -> Bool {

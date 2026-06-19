@@ -1,37 +1,65 @@
 import Foundation
 import SwiftTerm
 
-/// Owns the sandboxed PTY-backed terminal view, tees its I/O into the event log,
-/// and tracks the last command / exit code / stdout for challenge verification.
+enum SandboxError: LocalizedError {
+    case noContainerRuntime
+    var errorDescription: String? {
+        switch self {
+        case .noContainerRuntime: return "No container engine is installed for Linux courses."
+        }
+    }
+}
+
+/// Owns the sandboxed PTY-backed terminal view, tees its I/O into the event log, and
+/// tracks the last command / exit code / stdout for challenge verification. Backs both
+/// macOS courses (sandbox-exec + zsh) and Linux courses (a container engine + bash).
 @MainActor
-final class MacOSTerminalController: ObservableObject {
+final class SandboxTerminalController: ObservableObject {
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var statusMessage: String? = nil
     @Published private(set) var lastExitCode: Int? = nil
 
     let workingDirectory: URL
     let courseId: String
+    let environment: CourseEnvironment
     let view: SandboxTerminalProcessView
 
     private let sessionId: String
     private let eventStore: EventStore
+    private let runtime: ContainerRuntime?
     private var parser = ShellTeeParser()
     private var profileURL: URL?
 
+    private static let linuxImage = "docker.io/library/ubuntu:latest"
+
     /// Stdout of the most recently completed command (marker-stripped). Used by the verifier.
     private(set) var lastStdout: String = ""
-    /// The most recent command the student ran (from the preexec marker).
+    /// The most recent command the student ran (macOS only; Linux uses exit markers alone).
     private(set) var lastCommand: String? = nil
     /// Rolling transcript of rendered output, for the `llm_judge` verifier.
     private(set) var transcript: String = ""
 
     private static let transcriptCap = 20_000
 
-    init(courseId: String, sessionId: String, eventStore: EventStore) throws {
-        self.courseId = courseId
+    private var containerName: String { "ea-\(courseId.lowercased())" }
+
+    /// File checks for the verifier: host filesystem on macOS, container `exec` on Linux.
+    var fileSystem: SandboxFileSystem {
+        switch environment {
+        case .macos:
+            return HostSandboxFileSystem(root: workingDirectory)
+        case .linux:
+            return ContainerFileSystem(enginePath: runtime?.path ?? "", containerName: containerName)
+        }
+    }
+
+    init(course: Course, sessionId: String, eventStore: EventStore, runtime: ContainerRuntime?) throws {
+        self.courseId = course.id
+        self.environment = course.environment
         self.sessionId = sessionId
         self.eventStore = eventStore
-        let dir = AppPaths.sandboxesDir.appendingPathComponent(courseId, isDirectory: true)
+        self.runtime = runtime
+        let dir = AppPaths.sandboxesDir.appendingPathComponent(course.id, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.workingDirectory = dir
         self.view = SandboxTerminalProcessView(frame: CGRect(x: 0, y: 0, width: 640, height: 280))
@@ -40,6 +68,14 @@ final class MacOSTerminalController: ObservableObject {
 
     func start() throws {
         guard !isRunning else { return }
+        switch environment {
+        case .macos: try startMacOS()
+        case .linux: try startLinux()
+        }
+        isRunning = true
+    }
+
+    private func startMacOS() throws {
         let profile = SandboxProfile.macOSProfile(sandboxDir: workingDirectory.path)
         let profileURL = workingDirectory.appendingPathComponent(".sandbox.sb")
         try profile.write(to: profileURL, atomically: true, encoding: .utf8)
@@ -58,22 +94,58 @@ final class MacOSTerminalController: ObservableObject {
             ],
             currentDirectory: workingDirectory.path
         )
-        isRunning = true
         statusMessage = "Sandboxed zsh — writes confined to \(workingDirectory.lastPathComponent)/, network blocked."
+    }
+
+    private func startLinux() throws {
+        guard let runtime else { throw SandboxError.noContainerRuntime }
+        // bash runs PROMPT_COMMAND before each prompt, emitting the EAX exit-code marker
+        // that ShellTeeParser consumes. (No preexec marker on Linux, so lastCommand stays nil.)
+        let promptCommand = #"PROMPT_COMMAND=printf "\001EAX:%d\001" $?"#
+
+        view.startProcess(
+            executable: runtime.path,
+            args: [
+                "run", "--rm", "-it",
+                "--name", containerName,
+                "-e", promptCommand,
+                "-w", "/root",
+                Self.linuxImage,
+                "bash", "-i"
+            ],
+            environment: [
+                "HOME=\(NSHomeDirectory())",
+                "PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "TERM=xterm-256color",
+                "LANG=en_US.UTF-8"
+            ],
+            currentDirectory: nil
+        )
+        statusMessage = "\(runtime.displayName): launching Linux container (\(Self.linuxImage))… first run pulls the image. If it fails, run `\(runtime.engine.readinessHint)`."
     }
 
     func stop() {
         view.terminate()
-        if let url = profileURL { try? FileManager.default.removeItem(at: url) }
-        profileURL = nil
+        switch environment {
+        case .macos:
+            if let url = profileURL { try? FileManager.default.removeItem(at: url) }
+            profileURL = nil
+        case .linux:
+            forceRemoveContainer()
+        }
         isRunning = false
         statusMessage = "Shell stopped."
     }
 
     func reset() {
         view.terminate()
-        let contents = (try? FileManager.default.contentsOfDirectory(at: workingDirectory, includingPropertiesForKeys: nil)) ?? []
-        for url in contents { try? FileManager.default.removeItem(at: url) }
+        switch environment {
+        case .macos:
+            let contents = (try? FileManager.default.contentsOfDirectory(at: workingDirectory, includingPropertiesForKeys: nil)) ?? []
+            for url in contents { try? FileManager.default.removeItem(at: url) }
+        case .linux:
+            forceRemoveContainer()
+        }
         parser = ShellTeeParser()
         lastExitCode = nil
         lastStdout = ""
@@ -127,6 +199,13 @@ final class MacOSTerminalController: ObservableObject {
 
     // MARK: - Helpers
 
+    private func forceRemoveContainer() {
+        guard let runtime else { return }
+        let path = runtime.path
+        let name = containerName
+        Task.detached { _ = await ProcessRunner.run(path, ["rm", "-f", name]) }
+    }
+
     private func log(_ type: EventType, data: Data) {
         let courseId = self.courseId
         let sessionId = self.sessionId
@@ -147,7 +226,7 @@ final class MacOSTerminalController: ObservableObject {
         }
     }
 
-    /// Writes a `.zshrc` into the sandbox (its HOME/ZDOTDIR) that defines the prompt and
+    /// Writes a `.zshrc` into the macOS sandbox (its HOME/ZDOTDIR) defining the prompt and
     /// the preexec/precmd hooks emitting the markers `ShellTeeParser` consumes.
     private static func writeZshrc(to dir: URL) throws {
         let zshrc = """

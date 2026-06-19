@@ -5,7 +5,7 @@ import SwiftTerm
 /// log and strips shell-integration markers from the rendered output. All three
 /// overridden callbacks are delivered on the main queue by SwiftTerm.
 final class SandboxTerminalProcessView: LocalProcessTerminalView {
-    weak var coordinator: MacOSTerminalController?
+    weak var coordinator: SandboxTerminalController?
 
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
         MainActor.assumeIsolated { coordinator?.ingestInput(data) }

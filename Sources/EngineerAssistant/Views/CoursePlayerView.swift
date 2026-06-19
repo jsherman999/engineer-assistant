@@ -43,10 +43,14 @@ struct CoursePlayerView: View {
                 .frame(height: 280)
         } else if course.environment == .linux {
             Divider()
-            HStack {
+            HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "shippingbox")
-                Text("Linux container shell is wired up in Phase 5.")
-                    .font(.callout).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Linux courses need a container engine.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Text("Install Apple's `container` (recommended on macOS 26+) or `brew install podman`, then reopen this course.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
                 Spacer()
             }
             .padding(10)
@@ -147,41 +151,36 @@ struct CoursePlayerView: View {
             Text("Verify: \(verifyDescription(challenge.verify))")
                 .font(.caption).foregroundStyle(.secondary).italic()
 
-            if course.environment == .linux {
-                Text("Linux challenges can be checked once the container shell lands (Phase 5).")
-                    .font(.caption).foregroundStyle(.tertiary).italic()
-            } else {
-                HStack(spacing: 10) {
-                    Button {
-                        session.checkCurrentChallenge()
-                    } label: {
-                        if session.isChecking {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Check Challenge", systemImage: "checkmark.circle")
-                        }
-                    }
-                    .disabled(session.isChecking || session.terminal == nil)
-
-                    if let outcome = session.challengeOutcome {
-                        Label(outcome.passed ? "Passed" : "Not yet",
-                              systemImage: outcome.passed ? "checkmark.seal.fill" : "xmark.octagon.fill")
-                            .foregroundStyle(outcome.passed ? .green : .orange)
-                            .font(.callout)
+            HStack(spacing: 10) {
+                Button {
+                    session.checkCurrentChallenge()
+                } label: {
+                    if session.isChecking {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Check Challenge", systemImage: "checkmark.circle")
                     }
                 }
+                .disabled(session.isChecking || session.terminal == nil)
 
                 if let outcome = session.challengeOutcome {
-                    Text(outcome.detail)
-                        .font(.caption).foregroundStyle(.secondary)
-                    if !outcome.passed {
-                        if session.hintRevealed {
-                            Text("Hint: \(hintText(challenge))")
-                                .font(.caption).foregroundStyle(.blue).italic()
-                        } else {
-                            Button("Show hint") { session.revealHint() }
-                                .font(.caption).buttonStyle(.borderless)
-                        }
+                    Label(outcome.passed ? "Passed" : "Not yet",
+                          systemImage: outcome.passed ? "checkmark.seal.fill" : "xmark.octagon.fill")
+                        .foregroundStyle(outcome.passed ? .green : .orange)
+                        .font(.callout)
+                }
+            }
+
+            if let outcome = session.challengeOutcome {
+                Text(outcome.detail)
+                    .font(.caption).foregroundStyle(.secondary)
+                if !outcome.passed {
+                    if session.hintRevealed {
+                        Text("Hint: \(hintText(challenge))")
+                            .font(.caption).foregroundStyle(.blue).italic()
+                    } else {
+                        Button("Show hint") { session.revealHint() }
+                            .font(.caption).buttonStyle(.borderless)
                     }
                 }
             }

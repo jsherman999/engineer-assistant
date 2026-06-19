@@ -12,19 +12,26 @@ final class AppSession: ObservableObject {
     @Published var activeCourse: Course? = nil
     @Published var currentLessonIdx: Int = 0
     @Published var courses: [Course] = []
-    @Published var terminal: MacOSTerminalController? = nil
+    @Published var terminal: SandboxTerminalController? = nil
     @Published var isChecking: Bool = false
     @Published var challengeOutcome: VerifyOutcome? = nil
     @Published var hintRevealed: Bool = false
+    @Published var containerRuntime: ContainerRuntime? = nil
 
     private let claude = ClaudeClient()
     private let courseGenerator = CourseGenerator()
     private let courseStore: CourseStore = FileCourseStore()
     private let eventStore: EventStore = JSONLEventStore()
+    private let progressStore: ProgressStore = FileProgressStore()
     private lazy var verifier = Verifier(claude: claude)
+
+    func progress(for courseId: String) -> CourseProgress? {
+        progressStore.progress(for: courseId)
+    }
 
     func start() async {
         refreshAPIKeyStatus()
+        containerRuntime = ContainerRuntime.detect()
         courses = courseStore.listAll()
         do {
             let id = try await eventStore.startSession()
@@ -108,12 +115,14 @@ final class AppSession: ObservableObject {
 
     func openCourse(_ course: Course) {
         activeCourse = course
-        currentLessonIdx = 0
+        let resumeIdx = progressStore.progress(for: course.id)?.lessonIdx ?? 0
+        currentLessonIdx = max(0, min(resumeIdx, course.lessons.count - 1))
         resetChallengeState()
         startTerminalIfSupported(for: course)
+        let idx = currentLessonIdx
         Task {
             guard let sessionId else { return }
-            await logLessonStart(course: course, idx: 0, sessionId: sessionId)
+            await logLessonStart(course: course, idx: idx, sessionId: sessionId)
         }
     }
 
@@ -125,6 +134,7 @@ final class AppSession: ObservableObject {
             currentLessonIdx = 0
             return
         }
+        saveProgress(course: course)
         Task {
             await logLessonComplete(course: course, idx: currentLessonIdx, sessionId: sessionId, finished: false)
         }
@@ -132,15 +142,24 @@ final class AppSession: ObservableObject {
         currentLessonIdx = 0
     }
 
+    private func saveProgress(course: Course) {
+        let completed = currentLessonIdx >= course.lessons.count - 1
+        progressStore.set(CourseProgress(lessonIdx: currentLessonIdx, completed: completed), for: course.id)
+    }
+
     private func startTerminalIfSupported(for course: Course) {
         terminal?.stop()
         terminal = nil
-        guard course.environment == .macos, let sessionId else { return }
+        guard let sessionId else { return }
+        // Linux courses need a container engine; without one we leave the terminal nil
+        // and the player shows install guidance.
+        if course.environment == .linux && containerRuntime == nil { return }
         do {
-            let controller = try MacOSTerminalController(
-                courseId: course.id,
+            let controller = try SandboxTerminalController(
+                course: course,
                 sessionId: sessionId,
-                eventStore: eventStore
+                eventStore: eventStore,
+                runtime: course.environment == .linux ? containerRuntime : nil
             )
             try controller.start()
             terminal = controller
@@ -156,6 +175,7 @@ final class AppSession: ObservableObject {
         let nextIdx = currentLessonIdx + 1
         currentLessonIdx = nextIdx
         resetChallengeState()
+        saveProgress(course: course)
         Task {
             guard let sessionId else { return }
             await logLessonComplete(course: course, idx: prevIdx, sessionId: sessionId, finished: true)
@@ -167,6 +187,7 @@ final class AppSession: ObservableObject {
         guard currentLessonIdx > 0 else { return }
         currentLessonIdx -= 1
         resetChallengeState()
+        if let course = activeCourse { saveProgress(course: course) }
     }
 
     private func resetChallengeState() {
@@ -191,8 +212,8 @@ final class AppSession: ObservableObject {
         let context = VerifyContext(
             lastExitCode: terminal.lastExitCode,
             lastStdout: terminal.lastStdout,
-            sandboxDir: terminal.workingDirectory,
-            transcript: terminal.transcript
+            transcript: terminal.transcript,
+            fileSystem: terminal.fileSystem
         )
         let command = terminal.lastCommand ?? ""
         let idx = currentLessonIdx

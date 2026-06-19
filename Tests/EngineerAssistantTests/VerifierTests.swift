@@ -11,7 +11,12 @@ final class VerifierTests: XCTestCase {
     }
 
     private func context(exit: Int? = nil, stdout: String = "", sandbox: URL) -> VerifyContext {
-        VerifyContext(lastExitCode: exit, lastStdout: stdout, sandboxDir: sandbox, transcript: "")
+        VerifyContext(
+            lastExitCode: exit,
+            lastStdout: stdout,
+            transcript: "",
+            fileSystem: HostSandboxFileSystem(root: sandbox)
+        )
     }
 
     func testExitCodeMatch() async {
