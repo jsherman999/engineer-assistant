@@ -6,6 +6,11 @@ struct RootView: View {
     @State private var showingLibrary = false
     @State private var showingInstructor = false
 
+    private var generatingSubject: String? {
+        if session.isRegenerating { return session.activeCourse?.subject }
+        return session.messages.last(where: { $0.role == .user })?.text
+    }
+
     var body: some View {
         Group {
             if let course = session.activeCourse {
@@ -14,6 +19,13 @@ struct RootView: View {
                 ChatView()
             }
         }
+        .overlay {
+            if session.isGeneratingCourse {
+                CourseGeneratingOverlay(subject: generatingSubject)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: session.isGeneratingCourse)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

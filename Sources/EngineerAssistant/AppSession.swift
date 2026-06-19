@@ -35,6 +35,11 @@ final class AppSession: ObservableObject {
         progressStore.progress(for: courseId)
     }
 
+    /// True while Claude is generating a course (initial generation or regenerate).
+    var isGeneratingCourse: Bool {
+        isRegenerating || (currentMode == .course && isSending && activeCourse == nil)
+    }
+
     func start() async {
         refreshAPIKeyStatus()
         containerRuntime = ContainerRuntime.detect()
