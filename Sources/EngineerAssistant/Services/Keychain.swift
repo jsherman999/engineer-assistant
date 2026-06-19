@@ -48,4 +48,8 @@ struct KeychainError: Error {
 
 enum KeychainKeys {
     static let anthropicAPIKey = "anthropic_api_key"
+    static let instructorPinHash = "instructor_pin_hash"
+    static let instructorPinSalt = "instructor_pin_salt"
+    static let recoveryCodeHash = "recovery_code_hash"
+    static let recoveryCodeSalt = "recovery_code_salt"
 }

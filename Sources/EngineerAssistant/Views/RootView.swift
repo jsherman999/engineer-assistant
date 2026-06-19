@@ -4,6 +4,7 @@ struct RootView: View {
     @EnvironmentObject var session: AppSession
     @State private var showingSettings = false
     @State private var showingLibrary = false
+    @State private var showingInstructor = false
 
     var body: some View {
         Group {
@@ -38,6 +39,16 @@ struct RootView: View {
             CourseLibraryView()
                 .environmentObject(session)
         }
+        .sheet(isPresented: $showingInstructor) {
+            InstructorGateView()
+        }
+        .background(
+            // Hidden entry to the instructor dashboard (⌘⇧I); no visible control for the student.
+            Button("Instructor") { showingInstructor = true }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .opacity(0)
+                .accessibilityHidden(true)
+        )
         .onAppear {
             if !session.apiKeyConfigured {
                 showingSettings = true
