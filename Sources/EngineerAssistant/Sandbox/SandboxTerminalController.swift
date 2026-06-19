@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import SwiftTerm
 
 enum SandboxError: LocalizedError {
@@ -64,6 +65,10 @@ final class SandboxTerminalController: ObservableObject {
         self.workingDirectory = dir
         self.view = SandboxTerminalProcessView(frame: CGRect(x: 0, y: 0, width: 640, height: 280))
         self.view.coordinator = self
+        // Shrink to fit more rows, and use a dark IDE-style terminal palette.
+        self.view.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        self.view.nativeBackgroundColor = Theme.terminalBackgroundNS
+        self.view.nativeForegroundColor = Theme.terminalForegroundNS
     }
 
     func start() throws {

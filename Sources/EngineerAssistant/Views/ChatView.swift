@@ -34,6 +34,10 @@ struct ChatView: View {
             }
         }
         .padding(8)
+        .background(Theme.headerTint.opacity(0.07))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.headerTint.opacity(0.25)).frame(height: 1)
+        }
     }
 
     private var messageList: some View {

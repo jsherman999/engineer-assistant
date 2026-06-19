@@ -216,6 +216,7 @@ final class ClaudeClient {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.timeoutInterval = 180 // course/hint/judge are one non-streaming call; allow slow generations
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)
@@ -271,6 +272,7 @@ final class ClaudeClient {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.timeoutInterval = 180 // course/hint/judge are one non-streaming call; allow slow generations
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)
@@ -323,6 +325,7 @@ final class ClaudeClient {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.timeoutInterval = 180 // course/hint/judge are one non-streaming call; allow slow generations
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)

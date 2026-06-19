@@ -16,9 +16,12 @@ struct SandboxTerminalView: View {
             Circle()
                 .fill(controller.isRunning ? Color.green : Color.red)
                 .frame(width: 8, height: 8)
-            Text(controller.statusMessage ?? "Terminal")
-                .font(.caption).foregroundStyle(.secondary)
-                .lineLimit(1)
+            Text("TERMINAL")
+                .font(.caption2.bold()).tracking(1)
+                .foregroundStyle(Theme.terminalBarFg.opacity(0.9))
+            Text(controller.statusMessage ?? "")
+                .font(.caption).foregroundStyle(Theme.terminalBarFg.opacity(0.6))
+                .lineLimit(1).truncationMode(.tail)
             Spacer()
             Button {
                 controller.reset()
@@ -28,9 +31,10 @@ struct SandboxTerminalView: View {
                     .font(.caption)
             }
             .buttonStyle(.borderless)
+            .tint(Theme.terminalBarFg)
         }
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(.regularMaterial)
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Theme.terminalBarBg)
     }
 }
 

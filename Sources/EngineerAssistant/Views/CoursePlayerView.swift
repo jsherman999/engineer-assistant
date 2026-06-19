@@ -25,17 +25,18 @@ struct CoursePlayerView: View {
             Divider()
             if let lesson {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 14) {
                         lessonTitle(lesson)
-                        section("Concept") { conceptText(lesson.conceptMd) }
-                        section("Demos") { demosList(lesson.demos) }
-                        section("Practice") { practiceText(lesson.practicePrompt) }
-                        section("Challenge") { challengeBlock(lesson.challenge) }
-                        Spacer(minLength: 20)
+                        section("Concept", Theme.concept) { conceptText(lesson.conceptMd) }
+                        section("Demos", Theme.demos) { demosList(lesson.demos) }
+                        section("Practice", Theme.practice) { practiceText(lesson.practicePrompt) }
+                        section("Challenge", Theme.challenge) { challengeBlock(lesson.challenge) }
+                        Spacer(minLength: 16)
                     }
-                    .padding(20)
+                    .padding(18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .background(Theme.workspace)
             } else {
                 Text("No lessons.").padding()
             }
@@ -99,6 +100,10 @@ struct CoursePlayerView: View {
             }
         }
         .padding(14)
+        .background(Theme.headerTint.opacity(0.07))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.headerTint.opacity(0.25)).frame(height: 1)
+        }
     }
 
     private var envBadge: some View {
@@ -110,14 +115,27 @@ struct CoursePlayerView: View {
     }
 
     private func lessonTitle(_ lesson: Lesson) -> some View {
-        Text(lesson.title).font(.title3.bold())
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 2).fill(Theme.headerTint).frame(width: 4, height: 22)
+            Text(lesson.title).font(.title3.bold())
+        }
     }
 
-    private func section<Content: View>(_ name: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(name).font(.headline).foregroundStyle(.secondary)
-            content()
+    private func section<Content: View>(_ name: String, _ accent: Color, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            Rectangle().fill(accent.opacity(0.85)).frame(width: 3)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(name.uppercased())
+                    .font(.caption.bold()).tracking(0.8)
+                    .foregroundStyle(accent)
+                content()
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(Theme.panel)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent.opacity(0.18), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func conceptText(_ md: String) -> some View {
@@ -260,6 +278,7 @@ struct CoursePlayerView: View {
             .disabled(session.currentLessonIdx >= course.lessons.count - 1)
         }
         .padding(12)
+        .background(Theme.bar)
     }
 }
 
