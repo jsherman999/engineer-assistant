@@ -10,19 +10,27 @@ struct CoursePlayerView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            mainColumn
-            if session.showLessonChat {
-                Divider()
-                LessonChatSidebar().frame(width: 320)
-            }
-        }
-    }
-
-    private var mainColumn: some View {
         VStack(spacing: 0) {
             header
             Divider()
+            // IDE split: course narrative (left) | live terminal (right) | optional Ask sidebar.
+            HStack(spacing: 0) {
+                leftPanel
+                Divider()
+                rightPanel
+                if session.showLessonChat {
+                    Divider()
+                    LessonChatSidebar().frame(width: 320)
+                }
+            }
+            .frame(maxHeight: .infinity)
+            Divider()
+            controls
+        }
+    }
+
+    private var leftPanel: some View {
+        Group {
             if let lesson {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -36,36 +44,42 @@ struct CoursePlayerView: View {
                     .padding(18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .background(Theme.workspace)
             } else {
-                Text("No lessons.").padding()
+                Text("No lessons.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Divider()
-            controls
-            terminalPanel
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 320)
+        .background(Theme.workspace)
     }
 
     @ViewBuilder
-    private var terminalPanel: some View {
-        if let terminal = session.terminal {
-            Divider()
-            SandboxTerminalView(controller: terminal)
-                .frame(height: 280)
-        } else if course.environment == .linux {
-            Divider()
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "shippingbox")
-                VStack(alignment: .leading, spacing: 2) {
+    private var rightPanel: some View {
+        Group {
+            if let terminal = session.terminal {
+                SandboxTerminalView(controller: terminal)
+            } else if course.environment == .linux {
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(systemName: "shippingbox").font(.title2).foregroundStyle(.secondary)
                     Text("Linux courses need a container engine.")
                         .font(.callout).foregroundStyle(.secondary)
                     Text("Install Apple's `container` (recommended on macOS 26+) or `brew install podman`, then reopen this course.")
                         .font(.caption).foregroundStyle(.tertiary)
                 }
-                Spacer()
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Theme.workspace)
+            } else {
+                Text("Terminal unavailable.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.workspace)
             }
-            .padding(10)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 360)
     }
 
     private var header: some View {

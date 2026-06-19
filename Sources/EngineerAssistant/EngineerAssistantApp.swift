@@ -28,7 +28,7 @@ struct EngineerAssistantApp: App {
         WindowGroup("Engineer Assistant") {
             RootView()
                 .environmentObject(session)
-                .frame(minWidth: 900, minHeight: 600)
+                .frame(minWidth: 1040, minHeight: 640)
                 .task { await session.start() }
         }
     }
