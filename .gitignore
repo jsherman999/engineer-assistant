@@ -15,6 +15,9 @@ Package.resolved
 .vscode/
 .idea/
 
+# Claude Code local (environment-specific hooks, etc.)
+.claude/settings.local.json
+
 # App data (should never be checked in)
 *.sqlite
 *.sqlite-journal
