@@ -3,6 +3,9 @@ import SwiftUI
 struct CoursePlayerView: View {
     @EnvironmentObject var session: AppSession
     let course: Course
+    @State private var nextPulse = false
+
+    private var challengePassed: Bool { session.challengeOutcome?.passed == true }
 
     var lesson: Lesson? {
         guard session.currentLessonIdx < course.lessons.count else { return nil }
@@ -32,17 +35,24 @@ struct CoursePlayerView: View {
     private var leftPanel: some View {
         Group {
             if let lesson {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        lessonTitle(lesson)
-                        section("Concept", Theme.concept) { conceptText(lesson.conceptMd) }
-                        section("Demos", Theme.demos) { demosList(lesson.demos) }
-                        section("Practice", Theme.practice) { practiceText(lesson.practicePrompt) }
-                        section("Challenge", Theme.challenge) { challengeBlock(lesson.challenge) }
-                        Spacer(minLength: 16)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            lessonTitle(lesson).id("lessonTop")
+                            section("Concept", Theme.concept) { conceptText(lesson.conceptMd) }
+                            section("Demos", Theme.demos) { demosList(lesson.demos) }
+                            section("Practice", Theme.practice) { practiceText(lesson.practicePrompt) }
+                            section("Challenge", Theme.challenge) { challengeBlock(lesson.challenge) }
+                            Spacer(minLength: 16)
+                        }
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Start each lesson (and a freshly opened course) at the top, not scrolled down.
+                    .onChange(of: session.currentLessonIdx) { _, _ in
+                        proxy.scrollTo("lessonTop", anchor: .top)
+                    }
+                    .onAppear { proxy.scrollTo("lessonTop", anchor: .top) }
                 }
             } else {
                 Text("No lessons.")
@@ -126,8 +136,6 @@ struct CoursePlayerView: View {
                 envBadge
             }
             HStack(spacing: 12) {
-                Text("Lesson \(session.currentLessonIdx + 1) of \(course.lessons.count)")
-                    .font(.caption).foregroundStyle(.secondary)
                 Text("~\(course.estimatedMinutes) min").font(.caption).foregroundStyle(.secondary)
                 if !course.prerequisites.isEmpty {
                     Text("Prereqs: \(course.prerequisites.joined(separator: ", "))")
@@ -313,8 +321,16 @@ struct CoursePlayerView: View {
         }
     }
 
+    private var lessonBadge: some View {
+        Text("Lesson \(session.currentLessonIdx + 1) of \(course.lessons.count)")
+            .font(.headline)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .background(Capsule().fill(Theme.headerTint.gradient))
+    }
+
     private var controls: some View {
-        HStack {
+        HStack(spacing: 10) {
             Button {
                 session.previousLesson()
             } label: {
@@ -322,13 +338,13 @@ struct CoursePlayerView: View {
             }
             .disabled(session.currentLessonIdx == 0)
 
-            Spacer()
-
             Button(role: .destructive) {
                 session.exitCourse()
             } label: {
                 Label("Exit Course", systemImage: "xmark")
             }
+
+            Spacer()
 
             Button {
                 session.showLessonChat.toggle()
@@ -337,7 +353,7 @@ struct CoursePlayerView: View {
             }
             .help("Ask Claude a question about this lesson")
 
-            Spacer()
+            lessonBadge
 
             Button {
                 session.nextLesson()
@@ -345,6 +361,17 @@ struct CoursePlayerView: View {
                 Label("Next", systemImage: "chevron.right")
             }
             .disabled(session.currentLessonIdx >= course.lessons.count - 1)
+            .tint(challengePassed ? .green : nil)
+            .opacity(nextPulse ? 0.5 : 1.0)
+            // After a passing check, gently blink Next to draw attention (until you move on).
+            .onChange(of: session.challengeOutcome?.passed) { _, passed in
+                let canAdvance = session.currentLessonIdx < course.lessons.count - 1
+                if passed == true && canAdvance {
+                    withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) { nextPulse = true }
+                } else {
+                    withAnimation(.easeOut(duration: 0.2)) { nextPulse = false }
+                }
+            }
         }
         .padding(12)
         .background(Theme.bar)

@@ -47,7 +47,8 @@ final class SandboxTerminalController: ObservableObject {
 
     private static let transcriptCap = 20_000
 
-    private var containerName: String { "ea-\(courseId.lowercased())" }
+    static func containerName(forCourseId courseId: String) -> String { "ea-\(courseId.lowercased())" }
+    private var containerName: String { Self.containerName(forCourseId: courseId) }
 
     /// File checks for the verifier: host filesystem on macOS, container `exec` on Linux.
     var fileSystem: SandboxFileSystem {

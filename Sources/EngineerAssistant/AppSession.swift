@@ -251,11 +251,14 @@ final class AppSession: ObservableObject {
             containerStarting = true
             Task {
                 let (ready, message) = await runtime.ensureServiceRunning()
-                containerStarting = false
                 guard ready else {
+                    containerStarting = false
                     containerStartError = message
                     return
                 }
+                // Clear any container the previous run left behind before launching a new one.
+                await runtime.forceRemoveContainer(named: SandboxTerminalController.containerName(forCourseId: course.id))
+                containerStarting = false
                 startController(for: course, sessionId: sessionId, runtime: runtime)
             }
             return

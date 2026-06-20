@@ -55,6 +55,12 @@ struct ContainerRuntime: Equatable {
         await ProcessRunner.run(path, probeArguments).exit == 0
     }
 
+    /// Removes a leftover container so a fresh `run --name` doesn't collide with one a prior
+    /// session left behind (the "container already exists" error on reopening a course).
+    func forceRemoveContainer(named name: String) async {
+        _ = await ProcessRunner.run(path, ["rm", "-f", name])
+    }
+
     /// Ensures the engine's service is up, starting it if needed and waiting until it responds.
     /// Returns whether it's ready and, if not, an actionable message.
     func ensureServiceRunning(pollSeconds: Int = 30) async -> (ready: Bool, message: String) {
