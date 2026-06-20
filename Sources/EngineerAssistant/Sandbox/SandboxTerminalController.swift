@@ -60,9 +60,7 @@ final class SandboxTerminalController: ObservableObject {
         self.sessionId = sessionId
         self.eventStore = eventStore
         self.runtime = runtime
-        let dir = AppPaths.sandboxesDir.appendingPathComponent(course.id, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        self.workingDirectory = dir
+        self.workingDirectory = StudentSandbox.shared.directory(forCourseId: course.id)
         self.view = SandboxTerminalProcessView(frame: CGRect(x: 0, y: 0, width: 640, height: 280))
         self.view.coordinator = self
         // Shrink to fit more rows, and use a dark IDE-style terminal palette.

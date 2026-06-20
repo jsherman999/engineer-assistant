@@ -67,19 +67,21 @@ final class CourseFlowIntegrationTests: XCTestCase {
         results.record(LessonAttempt(id: "x", attempt: 1, lessonIdx: 0, lessonTitle: "Lesson 0", passed: true,
                                      detail: "ok", command: "c", hintUsed: false, timestamp: Date()),
                        courseId: course.id, subject: course.subject, title: course.title, lessonCount: 3)
-        let sandbox = dir.appendingPathComponent("sandboxes/\(course.id)", isDirectory: true)
-        try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+        let students = StudentSandbox(rootDir: dir.appendingPathComponent("students"),
+                                      mapFile: dir.appendingPathComponent("students.json"))
+        let sandbox = students.directory(forCourseId: course.id)
 
         // Preconditions.
         XCTAssertNotNil(courseStore.load(subject: course.subject))
         XCTAssertNotNil(progress.progress(for: course.id))
         XCTAssertNotNil(results.results(for: course.id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sandbox.path))
 
         // deleteCourse composition.
         try courseStore.delete(course)
         progress.remove(courseId: course.id)
         results.remove(courseId: course.id)
-        try FileManager.default.removeItem(at: sandbox)
+        students.remove(forCourseId: course.id)
 
         XCTAssertNil(courseStore.load(subject: course.subject), "course JSON gone")
         XCTAssertNil(progress.progress(for: course.id), "progress gone")

@@ -71,9 +71,12 @@ EA_RUN_CONTAINER_TESTS=1 swift test --filter ContainerIntegrationTests
 ├── events.jsonl        -- append-only chat + shell + lesson event log
 ├── progress.json       -- per-course resume point
 ├── results.json        -- per-course/lesson saved challenge results (attempts kept across retakes)
-├── courses/            -- generated, cached course JSON
-└── sandboxes/<id>/     -- per-course macOS sandbox working dirs
+├── students.json       -- maps each course to its student<N> sandbox directory
+└── courses/            -- generated, cached course JSON
 ```
+
+Sandbox working dirs live under the user's home as `~/students/student<N>` (one per course,
+numbered in the order courses are first opened) so the shell shows a short, friendly path.
 
 Keychain holds `anthropic_api_key`.
 

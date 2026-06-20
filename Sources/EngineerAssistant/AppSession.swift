@@ -303,8 +303,7 @@ final class AppSession: ObservableObject {
         try? courseStore.delete(course)
         progressStore.remove(courseId: course.id)
         resultsStore.remove(courseId: course.id)
-        let sandboxDir = AppPaths.sandboxesDir.appendingPathComponent(course.id, isDirectory: true)
-        try? FileManager.default.removeItem(at: sandboxDir)
+        StudentSandbox.shared.remove(forCourseId: course.id)
         courses = courseStore.listAll()
         resultsRevision += 1
     }
