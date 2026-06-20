@@ -71,12 +71,13 @@ EA_RUN_CONTAINER_TESTS=1 swift test --filter ContainerIntegrationTests
 ├── events.jsonl        -- append-only chat + shell + lesson event log
 ├── progress.json       -- per-course resume point
 ├── results.json        -- per-course/lesson saved challenge results (attempts kept across retakes)
-├── students.json       -- maps each course to its student<N> sandbox directory
+├── students.json       -- student<N> counter + the dirs each course has allocated
 └── courses/            -- generated, cached course JSON
 ```
 
-Sandbox working dirs live under the user's home as `~/students/student<N>` (one per course,
-numbered in the order courses are first opened) so the shell shows a short, friendly path.
+Sandbox working dirs live under the user's home as `~/students/student<N>` so the shell shows a
+short, friendly path. A fresh `student<N>` is allocated every time a course is opened (the counter
+only ever climbs); purging a course removes all the dirs it allocated.
 
 Keychain holds `anthropic_api_key`.
 

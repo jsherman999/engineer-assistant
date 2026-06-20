@@ -15,30 +15,36 @@ final class StudentSandboxTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
-    func testIncrementsPerCourseAndReuses() {
-        let a = sut.directory(forCourseId: "course-a")
-        let b = sut.directory(forCourseId: "course-b")
-        XCTAssertEqual(a.lastPathComponent, "student1")
-        XCTAssertEqual(b.lastPathComponent, "student2")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: a.path))
-
-        // Reopening the same course reuses its number, not a new one.
-        XCTAssertEqual(sut.directory(forCourseId: "course-a").lastPathComponent, "student1")
-        XCTAssertEqual(sut.directory(forCourseId: "course-c").lastPathComponent, "student3")
+    func testNewNumberOnEveryOpen() {
+        let a1 = sut.directory(forCourseId: "course-a")
+        let a2 = sut.directory(forCourseId: "course-a")   // reopening the SAME course → new dir
+        let b1 = sut.directory(forCourseId: "course-b")
+        XCTAssertEqual(a1.lastPathComponent, "student1")
+        XCTAssertEqual(a2.lastPathComponent, "student2")
+        XCTAssertEqual(b1.lastPathComponent, "student3")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: a1.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: a2.path))
     }
 
-    func testMappingPersistsAcrossInstances() {
-        _ = sut.directory(forCourseId: "course-a")
+    func testCounterPersistsAcrossInstances() {
+        _ = sut.directory(forCourseId: "course-a")        // student1
         let fresh = StudentSandbox(rootDir: dir.appendingPathComponent("students"),
                                    mapFile: dir.appendingPathComponent("students.json"))
-        XCTAssertEqual(fresh.directory(forCourseId: "course-a").lastPathComponent, "student1")
+        // Counter keeps climbing across app restarts — never resets/collides.
+        XCTAssertEqual(fresh.directory(forCourseId: "course-b").lastPathComponent, "student2")
     }
 
-    func testRemoveDeletesDirAndFreesMapping() {
-        let a = sut.directory(forCourseId: "course-a")
+    func testRemoveDeletesAllCourseDirsAndKeepsCounterClimbing() {
+        let a1 = sut.directory(forCourseId: "course-a")    // student1
+        let a2 = sut.directory(forCourseId: "course-a")    // student2
+        let b1 = sut.directory(forCourseId: "course-b")    // student3
+
         sut.remove(forCourseId: "course-a")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: a.path))
-        // After removal the next allocation continues from the highest remaining number.
-        XCTAssertEqual(sut.directory(forCourseId: "course-b").lastPathComponent, "student1")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: a1.path), "all of course-a's dirs removed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: a2.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: b1.path), "other course untouched")
+
+        // Counter does not reuse freed numbers.
+        XCTAssertEqual(sut.directory(forCourseId: "course-c").lastPathComponent, "student4")
     }
 }
