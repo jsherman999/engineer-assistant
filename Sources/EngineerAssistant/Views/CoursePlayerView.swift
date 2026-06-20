@@ -1,4 +1,36 @@
 import SwiftUI
+import AppKit
+
+/// A demo command on the dark terminal block, with a copy button that puts the bare command
+/// (no `$ ` prompt) on the clipboard so it can be pasted straight into the terminal.
+private struct DemoCommandRow: View {
+    let command: String
+    @State private var copied = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("$ \(command)")
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(.green)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(command, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .foregroundStyle(copied ? .green : Color(white: 0.85))
+            }
+            .buttonStyle(.borderless)
+            .help("Copy command")
+        }
+        .padding(8)
+        .background(Color.black.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
 
 struct CoursePlayerView: View {
     @EnvironmentObject var session: AppSession
@@ -204,13 +236,7 @@ struct CoursePlayerView: View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(demos.enumerated()), id: \.offset) { _, demo in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("$ \(demo.command)")
-                        .font(.system(.body, design: .monospaced))
-                        .padding(8)
-                        .background(Color.black.opacity(0.85))
-                        .foregroundStyle(.green)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .textSelection(.enabled)
+                    DemoCommandRow(command: demo.command)
                     if !demo.expectedOutput.isEmpty {
                         Text(demo.expectedOutput)
                             .font(.system(.callout, design: .monospaced))
