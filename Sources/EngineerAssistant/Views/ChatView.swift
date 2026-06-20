@@ -18,6 +18,8 @@ struct ChatView: View {
                 }
             }
         }
+        // Switching modes shows a fresh screen, so clear the unsent draft too.
+        .onChange(of: session.currentMode) { _, _ in input = "" }
     }
 
     private var chatColumn: some View {

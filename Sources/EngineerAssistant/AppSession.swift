@@ -4,7 +4,18 @@ import SwiftUI
 @MainActor
 final class AppSession: ObservableObject {
     @Published var messages: [ChatMessage] = []
-    @Published var currentMode: ChatMode = .ask
+    @Published var currentMode: ChatMode = .ask {
+        didSet {
+            guard oldValue != currentMode else { return }
+            // Ask and Course keep separate transcripts: switching shows the other mode's own
+            // (initially empty) screen and preserves the one you left.
+            transcripts[oldValue] = messages
+            messages = transcripts[currentMode] ?? []
+            lastError = nil
+        }
+    }
+    /// Per-mode chat transcripts so Ask and Course never share the same input/output screen.
+    private var transcripts: [ChatMode: [ChatMessage]] = [:]
     @Published var isSending: Bool = false
     @Published var apiKeyConfigured: Bool = false
     @Published var sessionId: String? = nil
