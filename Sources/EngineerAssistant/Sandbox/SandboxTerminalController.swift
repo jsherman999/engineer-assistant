@@ -102,9 +102,13 @@ final class SandboxTerminalController: ObservableObject {
 
     private func startLinux() throws {
         guard let runtime else { throw SandboxError.noContainerRuntime }
-        // bash runs PROMPT_COMMAND before each prompt, emitting the EAX exit-code marker
-        // that ShellTeeParser consumes. (No preexec marker on Linux, so lastCommand stays nil.)
-        let promptCommand = #"PROMPT_COMMAND=printf "\001EAX:%d\001" $?"#
+        // bash runs PROMPT_COMMAND before each prompt: it emits the EAX exit-code marker
+        // ShellTeeParser consumes (reading $? FIRST so the code is the user command's), then
+        // sets a clean PS1 — `student<N>:<dir>#` — replacing the noisy `root@ea-<uuid>:~#`
+        // default and matching the student<N> workspace name used for macOS courses.
+        // (No preexec marker on Linux, so lastCommand stays nil.)
+        let label = workingDirectory.lastPathComponent
+        let promptCommand = #"PROMPT_COMMAND=printf "\001EAX:%d\001" $?; PS1='\#(label):\w\$ '"#
 
         view.startProcess(
             executable: runtime.path,
