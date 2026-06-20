@@ -99,7 +99,10 @@ final class SandboxTerminalController: ObservableObject {
             environment: [
                 "HOME=\(workingDirectory.path)",
                 "ZDOTDIR=\(workingDirectory.path)",
-                "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                // Include Homebrew (Apple Silicon /opt/homebrew, Intel /usr/local) so host-installed
+                // tools like pstree/tree/htop resolve. The sandbox allows read/exec, so they run;
+                // network and writes outside the sandbox dir stay blocked, so `brew install` won't.
+                "PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
                 "TERM=xterm-256color",
                 "LANG=en_US.UTF-8"
             ],
