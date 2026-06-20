@@ -181,7 +181,7 @@ final class AppSession: ObservableObject {
 
     private func handleCourse(subject: String, sessionId: String) async {
         do {
-            let result = try await courseGenerator.generate(subject: subject)
+            let result = try await courseGenerator.generate(subject: subject, containerGuidance: containerGuidance())
             let course = result.course
 
             await logCourseGenerated(course: course, wasCached: result.wasCached, sessionId: sessionId)
@@ -199,6 +199,21 @@ final class AppSession: ObservableObject {
             lastError = error.localizedDescription
             let reply = ChatMessage(role: .assistant, mode: .course, text: "Could not generate course: \(error.localizedDescription)")
             messages.append(reply)
+        }
+    }
+
+    /// Tells the course generator which container CLI is actually installed, so it uses the
+    /// right syntax (Apple `container` is NOT Docker — `container image pull`, not `container pull`).
+    private func containerGuidance() -> String? {
+        switch containerRuntime?.engine {
+        case .apple:
+            return "Container CLI note: this Mac uses Apple's `container` tool, which is NOT Docker-compatible at the top level. Image commands are subcommands of `container image` — e.g. `container image pull alpine:latest`, `container image list` (alias `container image ls`). Run a container with `container run`. NEVER use `container pull`, `container images`, or any `docker`/`podman` command."
+        case .podman:
+            return "Container CLI note: this Mac uses Podman (Docker-compatible). Use `podman pull`, `podman images`, `podman run`."
+        case .docker:
+            return "Container CLI note: this Mac uses Docker. Use `docker pull`, `docker images`, `docker run`."
+        case nil:
+            return nil
         }
     }
 
@@ -481,7 +496,7 @@ final class AppSession: ObservableObject {
         let subject = course.subject
         Task {
             do {
-                let result = try await courseGenerator.generate(subject: subject, forceRefresh: true)
+                let result = try await courseGenerator.generate(subject: subject, forceRefresh: true, containerGuidance: containerGuidance())
                 await logCourseGenerated(course: result.course, wasCached: false, sessionId: sessionId)
                 courses = courseStore.listAll()
                 isRegenerating = false

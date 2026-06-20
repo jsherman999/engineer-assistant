@@ -278,7 +278,7 @@ final class ClaudeClient {
         ]
     }
 
-    func generateCourse(subject: String, model: String = defaultModel) async throws -> CourseDraft {
+    func generateCourse(subject: String, containerGuidance: String? = nil, model: String = defaultModel) async throws -> CourseDraft {
         guard let apiKey = Keychain.get(KeychainKeys.anthropicAPIKey), !apiKey.isEmpty else {
             throw ClaudeError.missingAPIKey
         }
@@ -294,7 +294,7 @@ final class ClaudeClient {
             // A 3–5 lesson course is a large tool_use payload; 4096 truncated it mid-JSON
             // (the input came back missing `lessons`). Give it ample headroom.
             "max_tokens": 16384,
-            "system": Self.courseModeSystemPrompt,
+            "system": Self.courseModeSystemPrompt + (containerGuidance.map { "\n\n\($0)" } ?? ""),
             "tools": [tool],
             "tool_choice": ["type": "tool", "name": "emit_course"],
             "messages": [

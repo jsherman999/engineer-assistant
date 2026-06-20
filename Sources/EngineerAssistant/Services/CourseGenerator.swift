@@ -76,12 +76,12 @@ final class CourseGenerator {
         self.store = store
     }
 
-    func generate(subject: String, forceRefresh: Bool = false) async throws -> GenerationResult {
+    func generate(subject: String, forceRefresh: Bool = false, containerGuidance: String? = nil) async throws -> GenerationResult {
         let trimmed = subject.trimmingCharacters(in: .whitespacesAndNewlines)
         if !forceRefresh, let cached = store.load(subject: trimmed) {
             return GenerationResult(course: cached, wasCached: true)
         }
-        let draft = try await client.generateCourse(subject: trimmed)
+        let draft = try await client.generateCourse(subject: trimmed, containerGuidance: containerGuidance)
         let course = Course(subject: trimmed, draft: draft)
         try store.save(course)
         return GenerationResult(course: course, wasCached: false)
