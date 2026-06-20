@@ -202,7 +202,9 @@ final class ClaudeClient {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 4096,
+            // A 3–5 lesson course is a large tool_use payload; 4096 truncated it mid-JSON
+            // (the input came back missing `lessons`). Give it ample headroom.
+            "max_tokens": 16384,
             "system": Self.courseModeSystemPrompt,
             "tools": [tool],
             "tool_choice": ["type": "tool", "name": "emit_course"],
@@ -242,6 +244,11 @@ final class ClaudeClient {
         do {
             return try JSONDecoder().decode(CourseDraft.self, from: inputData)
         } catch {
+            // A truncated generation (hit max_tokens) yields a partial tool input that fails
+            // to decode; surface that distinctly from a genuinely malformed schema.
+            if (obj["stop_reason"] as? String) == "max_tokens" {
+                throw ClaudeError.invalidCourseSchema("the course response was cut off at the output-token limit. Try regenerating or a narrower subject.")
+            }
             throw ClaudeError.invalidCourseSchema(String(describing: error))
         }
     }
