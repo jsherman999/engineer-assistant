@@ -129,13 +129,81 @@ private struct MessageBubble: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text(message.text.isEmpty ? "…" : message.text)
-                    .textSelection(.enabled)
+                bubbleContent
                     .padding(10)
                     .background(message.role == .user ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             if message.role == .assistant { Spacer(minLength: 60) }
         }
+    }
+
+    @ViewBuilder
+    private var bubbleContent: some View {
+        if message.text.isEmpty {
+            Text("…").textSelection(.enabled)
+        } else if message.role == .user {
+            // User keeps the default app font.
+            Text(message.text).textSelection(.enabled)
+        } else {
+            // Claude's responses use a smaller, distinct typeface; command examples render
+            // as a mini-terminal with a colored prompt instead of ```bash fences.
+            AssistantContent(text: message.text)
+        }
+    }
+}
+
+/// Renders an assistant message: prose in a small rounded font, and fenced code blocks
+/// (or `$`/`❯`-prefixed lines) as prompt-prefixed monospace command blocks.
+private struct AssistantContent: View {
+    let text: String
+
+    private static let proseFont = Font.system(.callout, design: .rounded)
+    private static let promptColor = Color(red: 0.36, green: 0.92, blue: 0.45)
+    private static let codeText = Color(red: 0.88, green: 0.91, blue: 0.88)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(AssistantText.segments(text).enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .prose(let s): proseView(s)
+                case .commands(let lines): commandBlock(lines)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func proseView(_ s: String) -> some View {
+        let rendered: Text
+        if let attributed = try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+            rendered = Text(attributed)
+        } else {
+            rendered = Text(s)
+        }
+        return rendered
+            .font(Self.proseFont)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func commandBlock(_ lines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                HStack(alignment: .top, spacing: 6) {
+                    Text("❯")
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(Self.promptColor)
+                    Text(line)
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(Self.codeText)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
