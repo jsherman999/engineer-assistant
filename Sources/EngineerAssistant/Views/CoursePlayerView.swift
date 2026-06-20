@@ -175,11 +175,21 @@ struct CoursePlayerView: View {
     }
 
     private func conceptText(_ md: String) -> some View {
-        if let attributed = try? AttributedString(markdown: md, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-            return AnyView(Text(attributed).textSelection(.enabled))
-        } else {
-            return AnyView(Text(md).textSelection(.enabled))
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(MarkdownTable.split(md).enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .text(let t):
+                    if let attributed = try? AttributedString(markdown: t, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+                        Text(attributed).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text(t).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                case .table(let rows):
+                    TableGrid(rows: rows, font: .callout)
+                }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func demosList(_ demos: [Demo]) -> some View {

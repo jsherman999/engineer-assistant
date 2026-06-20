@@ -175,6 +175,18 @@ private struct AssistantContent: View {
     }
 
     private func proseView(_ s: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(MarkdownTable.split(s).enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .text(let t): markdownText(t)
+                case .table(let rows): TableGrid(rows: rows, font: Self.proseFont)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func markdownText(_ s: String) -> some View {
         let rendered: Text
         if let attributed = try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             rendered = Text(attributed)
