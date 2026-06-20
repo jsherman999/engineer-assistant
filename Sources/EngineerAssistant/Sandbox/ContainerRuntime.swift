@@ -32,6 +32,42 @@ struct ContainerRuntime: Equatable {
 
     var displayName: String { engine.displayName }
 
+    /// A lightweight command that round-trips to the engine's service; nonzero exit means the
+    /// service isn't up (e.g. Apple `container`'s "XPC connection error").
+    var probeArguments: [String] {
+        switch engine {
+        case .apple: return ["ls"]
+        case .podman, .docker: return ["info"]
+        }
+    }
+
+    /// The command that starts the engine's background service.
+    var startInvocation: (path: String, args: [String]) {
+        switch engine {
+        case .apple: return (path, ["system", "start"])
+        case .podman: return (path, ["machine", "start"])
+        case .docker: return ("/usr/bin/open", ["-a", "Docker"])
+        }
+    }
+
+    /// True when the engine's service responds.
+    func isServiceRunning() async -> Bool {
+        await ProcessRunner.run(path, probeArguments).exit == 0
+    }
+
+    /// Ensures the engine's service is up, starting it if needed and waiting until it responds.
+    /// Returns whether it's ready and, if not, an actionable message.
+    func ensureServiceRunning(pollSeconds: Int = 30) async -> (ready: Bool, message: String) {
+        if await isServiceRunning() { return (true, "") }
+        let start = startInvocation
+        _ = await ProcessRunner.run(start.path, start.args)
+        for _ in 0..<pollSeconds {
+            if await isServiceRunning() { return (true, "") }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        return (false, "Couldn't start \(displayName). Run `\(engine.readinessHint)` in Terminal, then reopen the course.")
+    }
+
     /// Detects an installed engine, preferring Apple `container`, then Podman, then Docker.
     static func detect(searchPaths: [String] = defaultSearchPaths) -> ContainerRuntime? {
         for engine in Engine.allCases {

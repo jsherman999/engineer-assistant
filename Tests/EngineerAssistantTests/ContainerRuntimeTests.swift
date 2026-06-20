@@ -38,6 +38,22 @@ final class ContainerRuntimeTests: XCTestCase {
         XCTAssertNil(ContainerRuntime.detect(searchPaths: [dir.path]))
     }
 
+    func testProbeAndStartCommandsPerEngine() {
+        let apple = ContainerRuntime(engine: .apple, path: "/opt/bin/container")
+        XCTAssertEqual(apple.probeArguments, ["ls"])
+        XCTAssertEqual(apple.startInvocation.path, "/opt/bin/container")
+        XCTAssertEqual(apple.startInvocation.args, ["system", "start"])
+
+        let podman = ContainerRuntime(engine: .podman, path: "/opt/bin/podman")
+        XCTAssertEqual(podman.probeArguments, ["info"])
+        XCTAssertEqual(podman.startInvocation.args, ["machine", "start"])
+
+        let docker = ContainerRuntime(engine: .docker, path: "/opt/bin/docker")
+        XCTAssertEqual(docker.probeArguments, ["info"])
+        XCTAssertEqual(docker.startInvocation.path, "/usr/bin/open")
+        XCTAssertEqual(docker.startInvocation.args, ["-a", "Docker"])
+    }
+
     func testShellSingleQuoteEscapes() {
         XCTAssertEqual(shellSingleQuote("/root/foo.txt"), "'/root/foo.txt'")
         XCTAssertEqual(shellSingleQuote("a'b"), "'a'\\''b'")

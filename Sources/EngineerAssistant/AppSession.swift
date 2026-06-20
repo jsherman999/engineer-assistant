@@ -20,6 +20,8 @@ final class AppSession: ObservableObject {
     @Published var hintLoading: Bool = false
     @Published var containerRuntime: ContainerRuntime? = nil
     @Published var isRegenerating: Bool = false
+    @Published var containerStarting: Bool = false
+    @Published var containerStartError: String? = nil
     @Published var showLessonChat: Bool = false
     @Published var lessonChat: [ChatMessage] = []
     @Published var lessonChatSending: Bool = false
@@ -172,16 +174,38 @@ final class AppSession: ObservableObject {
     private func startTerminalIfSupported(for course: Course) {
         terminal?.stop()
         terminal = nil
+        containerStarting = false
+        containerStartError = nil
         guard let sessionId else { return }
-        // Linux courses need a container engine; without one we leave the terminal nil
-        // and the player shows install guidance.
-        if course.environment == .linux && containerRuntime == nil { return }
+
+        if course.environment == .linux {
+            // Without an engine we leave the terminal nil and the player shows install guidance.
+            guard let runtime = containerRuntime else { return }
+            // The engine's binary exists but its service may be down; start it before launching
+            // the container so the student doesn't see a raw "XPC connection error".
+            containerStarting = true
+            Task {
+                let (ready, message) = await runtime.ensureServiceRunning()
+                containerStarting = false
+                guard ready else {
+                    containerStartError = message
+                    return
+                }
+                startController(for: course, sessionId: sessionId, runtime: runtime)
+            }
+            return
+        }
+
+        startController(for: course, sessionId: sessionId, runtime: nil)
+    }
+
+    private func startController(for course: Course, sessionId: String, runtime: ContainerRuntime?) {
         do {
             let controller = try SandboxTerminalController(
                 course: course,
                 sessionId: sessionId,
                 eventStore: eventStore,
-                runtime: course.environment == .linux ? containerRuntime : nil
+                runtime: runtime
             )
             try controller.start()
             terminal = controller

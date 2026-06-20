@@ -60,6 +60,28 @@ struct CoursePlayerView: View {
         Group {
             if let terminal = session.terminal {
                 SandboxTerminalView(controller: terminal)
+            } else if session.containerStarting {
+                VStack(alignment: .leading, spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Starting \(session.containerRuntime?.displayName ?? "container engine")…")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Text("Bringing up the container service for this Linux course. This can take a few seconds the first time.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Theme.workspace)
+            } else if let startError = session.containerStartError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle").font(.title2).foregroundStyle(.orange)
+                    Text("Couldn't start the container engine.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Text(startError)
+                        .font(.caption).foregroundStyle(.tertiary).textSelection(.enabled)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Theme.workspace)
             } else if course.environment == .linux {
                 VStack(alignment: .leading, spacing: 8) {
                     Image(systemName: "shippingbox").font(.title2).foregroundStyle(.secondary)
