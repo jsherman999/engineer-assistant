@@ -23,6 +23,9 @@ final class SandboxTerminalController: ObservableObject {
     let workingDirectory: URL
     let courseId: String
     let environment: CourseEnvironment
+    /// When false (Ask mode), the macOS shell runs unsandboxed with full access; when true
+    /// (Course mode), it runs under sandbox-exec with writes confined and network blocked.
+    let confined: Bool
     let view: SandboxTerminalProcessView
 
     private let sessionId: String
@@ -32,6 +35,8 @@ final class SandboxTerminalController: ObservableObject {
     private var profileURL: URL?
 
     private static let linuxImage = "docker.io/library/ubuntu:latest"
+    /// PATH including Homebrew (Apple Silicon + Intel) so host-installed tools resolve.
+    private static let macPATH = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     /// Stdout of the most recently completed command (marker-stripped). Used by the verifier.
     private(set) var lastStdout: String = ""
@@ -60,10 +65,12 @@ final class SandboxTerminalController: ObservableObject {
          sessionId: String,
          eventStore: EventStore,
          runtime: ContainerRuntime?,
+         confined: Bool = true,
          fontSize: CGFloat = 11,
          foregroundColor: NSColor = Theme.terminalForegroundNS) throws {
         self.courseId = courseId
         self.environment = environment
+        self.confined = confined
         self.sessionId = sessionId
         self.eventStore = eventStore
         self.runtime = runtime
@@ -87,11 +94,16 @@ final class SandboxTerminalController: ObservableObject {
     }
 
     private func startMacOS() throws {
+        // Our minimal zshrc (short prompt + shell-integration markers) lives in the working
+        // dir, used as ZDOTDIR in both modes.
+        try Self.writeZshrc(to: workingDirectory)
+
+        guard confined else { return try startMacOSUnrestricted() }
+
         let profile = SandboxProfile.macOSProfile(sandboxDir: workingDirectory.path)
         let profileURL = workingDirectory.appendingPathComponent(".sandbox.sb")
         try profile.write(to: profileURL, atomically: true, encoding: .utf8)
         self.profileURL = profileURL
-        try Self.writeZshrc(to: workingDirectory)
 
         view.startProcess(
             executable: "/usr/bin/sandbox-exec",
@@ -99,16 +111,35 @@ final class SandboxTerminalController: ObservableObject {
             environment: [
                 "HOME=\(workingDirectory.path)",
                 "ZDOTDIR=\(workingDirectory.path)",
-                // Include Homebrew (Apple Silicon /opt/homebrew, Intel /usr/local) so host-installed
-                // tools like pstree/tree/htop resolve. The sandbox allows read/exec, so they run;
-                // network and writes outside the sandbox dir stay blocked, so `brew install` won't.
-                "PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
+                // Homebrew on PATH so host-installed tools resolve; the sandbox allows read/exec
+                // so they run, but network and writes outside the sandbox dir stay blocked.
+                "PATH=\(Self.macPATH)",
                 "TERM=xterm-256color",
                 "LANG=en_US.UTF-8"
             ],
             currentDirectory: workingDirectory.path
         )
         statusMessage = "Sandboxed zsh — writes confined to \(workingDirectory.lastPathComponent)/, network blocked."
+    }
+
+    /// Ask mode: a full, unsandboxed shell in the user's real home with network and package
+    /// installs allowed — a real Terminal for learning about this Mac. ZDOTDIR still points at
+    /// our short-prompt zshrc so the prompt stays clean.
+    private func startMacOSUnrestricted() throws {
+        let home = NSHomeDirectory()
+        view.startProcess(
+            executable: "/bin/zsh",
+            args: ["-i"],
+            environment: [
+                "HOME=\(home)",
+                "ZDOTDIR=\(workingDirectory.path)",
+                "PATH=\(Self.macPATH)",
+                "TERM=xterm-256color",
+                "LANG=en_US.UTF-8"
+            ],
+            currentDirectory: home
+        )
+        statusMessage = "Full shell — your Mac, unrestricted (network and installs allowed)."
     }
 
     private func startLinux() throws {

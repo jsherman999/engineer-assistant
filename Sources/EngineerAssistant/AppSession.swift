@@ -67,8 +67,9 @@ final class AppSession: ObservableObject {
         }
     }
 
-    /// A persistent macOS sandbox shell shown beside Ask-mode chat so the student can try the
-    /// commands being described. Same sandbox machinery as course mode, its own scratch dir.
+    /// A persistent, unrestricted macOS shell shown beside Ask-mode chat so the student can try
+    /// the commands being described on their real Mac (full network/filesystem access). Course
+    /// mode stays sandboxed; only Ask mode is unconfined.
     private func startAskTerminal() {
         guard askTerminal == nil, let sessionId else { return }
         do {
@@ -79,6 +80,7 @@ final class AppSession: ObservableObject {
                 sessionId: sessionId,
                 eventStore: eventStore,
                 runtime: nil,
+                confined: false,
                 fontSize: 10,
                 foregroundColor: Theme.terminalGreenNS
             )

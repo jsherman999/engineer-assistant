@@ -77,8 +77,10 @@ EA_RUN_CONTAINER_TESTS=1 swift test --filter ContainerIntegrationTests
 
 Sandbox working dirs live under the user's home as `~/students/student<N>` so the shell shows a
 short, friendly path. A fresh `student<N>` is allocated every time a course is opened (the counter
-only ever climbs); purging a course removes all the dirs it allocated. Ask mode has its own
-persistent shell in `~/students/ask`, shown beside the chat for trying commands as they're described.
+only ever climbs); purging a course removes all the dirs it allocated. Ask mode runs an
+**unrestricted** shell (no sandbox) in the user's real home — a real Terminal for learning about
+this Mac, with network and package installs allowed — shown beside the chat. Its short-prompt
+zshrc lives in `~/students/ask` (used as `ZDOTDIR`).
 
 Keychain holds `anthropic_api_key`.
 
