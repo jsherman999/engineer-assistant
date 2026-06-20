@@ -215,21 +215,7 @@ struct CoursePlayerView: View {
     }
 
     private func conceptText(_ md: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(MarkdownTable.split(md).enumerated()), id: \.offset) { _, block in
-                switch block {
-                case .text(let t):
-                    if let attributed = try? AttributedString(markdown: t, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-                        Text(attributed).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text(t).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                case .table(let rows):
-                    TableGrid(rows: rows, font: .callout)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        MarkdownContentView(text: md)
     }
 
     private func demosList(_ demos: [Demo]) -> some View {
@@ -253,7 +239,7 @@ struct CoursePlayerView: View {
 
     private func practiceText(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(text).textSelection(.enabled)
+            MarkdownContentView(text: text)
             if session.terminal != nil {
                 Text("Try it in the sandboxed shell below.")
                     .font(.caption).foregroundStyle(.tertiary).italic()
@@ -263,7 +249,7 @@ struct CoursePlayerView: View {
 
     private func challengeBlock(_ challenge: Challenge) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(challenge.task).textSelection(.enabled)
+            MarkdownContentView(text: challenge.task)
             if let starter = challenge.starterState, !starter.isEmpty {
                 Text("Starter state: \(starter)").font(.caption).foregroundStyle(.secondary)
             }
