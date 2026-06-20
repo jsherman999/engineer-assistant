@@ -23,5 +23,7 @@ final class SandboxTests: XCTestCase {
         XCTAssertFalse(writeRegion.contains("/Users"), "user home must not be writable")
         XCTAssertFalse(writeRegion.contains("/System"), "/System must not be writable")
         XCTAssertTrue(writeRegion.contains("/tmp/x"), "sandbox dir must be writable")
+        // /opt/homebrew is a later entry in the allow block (so not in the first-line region above).
+        XCTAssertTrue(profile.contains("(subpath \"/opt/homebrew\")"), "Homebrew prefix must be writable for brew install")
     }
 }

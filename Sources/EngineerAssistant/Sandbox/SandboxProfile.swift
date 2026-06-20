@@ -6,11 +6,13 @@ enum SandboxProfile {
         (version 1)
         (allow default)
 
-        ;; Block all writes by default, then re-allow only inside the sandbox
-        ;; and a few necessary device/temp paths the shell needs to function.
+        ;; Block all writes by default, then re-allow inside the sandbox, the necessary
+        ;; device/temp paths the shell needs, and the Homebrew prefix so `brew install` works.
+        ;; (/opt/homebrew is the REAL shared Homebrew — installs here persist on the host.)
         (deny file-write*)
         (allow file-write*
           (subpath "\(sandboxDir)")
+          (subpath "/opt/homebrew")
           (subpath "/private/tmp")
           (subpath "/private/var/folders")
           (literal "/dev/null")
@@ -20,10 +22,9 @@ enum SandboxProfile {
           (literal "/dev/stderr")
           (literal "/dev/dtracehelper"))
 
-        ;; Network is allowed (via allow default) so teaching tools that fetch data —
-        ;; brew info/search, curl, git, dig — work. The student still can't modify the real
-        ;; system: writes stay confined to the sandbox dir, so e.g. `brew install` (which writes
-        ;; to /opt/homebrew) is still blocked.
+        ;; Network is allowed (via allow default) so brew/curl/git/dns work. The rest of the
+        ;; system (home, /System, /usr) stays write-protected — only the sandbox dir, temp,
+        ;; and the Homebrew prefix are writable.
         """
     }
 }
