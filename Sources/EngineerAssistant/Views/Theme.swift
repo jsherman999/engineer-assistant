@@ -21,4 +21,5 @@ enum Theme {
     static let terminalBarFg = Color(red: 0.82, green: 0.85, blue: 0.90)
     static let terminalBackgroundNS = NSColor(calibratedRed: 0.08, green: 0.09, blue: 0.11, alpha: 1)
     static let terminalForegroundNS = NSColor(calibratedRed: 0.84, green: 0.87, blue: 0.91, alpha: 1)
+    static let terminalGreenNS = NSColor(calibratedRed: 0.36, green: 0.92, blue: 0.45, alpha: 1)
 }

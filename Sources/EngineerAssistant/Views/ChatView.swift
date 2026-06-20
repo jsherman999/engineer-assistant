@@ -8,10 +8,25 @@ struct ChatView: View {
         VStack(spacing: 0) {
             modePicker
             Divider()
+            HStack(spacing: 0) {
+                chatColumn
+                // Ask mode: a live sandbox shell beside the chat for trying the commands.
+                if session.currentMode == .ask, let term = session.askTerminal {
+                    Divider()
+                    SandboxTerminalView(controller: term)
+                        .frame(minWidth: 340, idealWidth: 440, maxWidth: 560)
+                }
+            }
+        }
+    }
+
+    private var chatColumn: some View {
+        VStack(spacing: 0) {
             messageList
             Divider()
             inputBar
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var modePicker: some View {

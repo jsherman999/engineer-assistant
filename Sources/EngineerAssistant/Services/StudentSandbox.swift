@@ -43,6 +43,14 @@ struct StudentSandbox {
         return dir
     }
 
+    /// A single stable scratch directory for Ask mode. Not numbered — it persists across the
+    /// session so the student keeps one workspace while experimenting alongside the chat.
+    func askDirectory() -> URL {
+        let dir = rootDir.appendingPathComponent("ask", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     /// Removes every student directory this course has allocated and forgets them (used when
     /// a course is purged). The global counter is left untouched so numbers keep climbing.
     func remove(forCourseId courseId: String) {

@@ -77,7 +77,8 @@ EA_RUN_CONTAINER_TESTS=1 swift test --filter ContainerIntegrationTests
 
 Sandbox working dirs live under the user's home as `~/students/student<N>` so the shell shows a
 short, friendly path. A fresh `student<N>` is allocated every time a course is opened (the counter
-only ever climbs); purging a course removes all the dirs it allocated.
+only ever climbs); purging a course removes all the dirs it allocated. Ask mode has its own
+persistent shell in `~/students/ask`, shown beside the chat for trying commands as they're described.
 
 Keychain holds `anthropic_api_key`.
 

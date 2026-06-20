@@ -54,19 +54,27 @@ final class SandboxTerminalController: ObservableObject {
         }
     }
 
-    init(course: Course, sessionId: String, eventStore: EventStore, runtime: ContainerRuntime?) throws {
-        self.courseId = course.id
-        self.environment = course.environment
+    init(courseId: String,
+         environment: CourseEnvironment,
+         workingDirectory: URL,
+         sessionId: String,
+         eventStore: EventStore,
+         runtime: ContainerRuntime?,
+         fontSize: CGFloat = 11,
+         foregroundColor: NSColor = Theme.terminalForegroundNS) throws {
+        self.courseId = courseId
+        self.environment = environment
         self.sessionId = sessionId
         self.eventStore = eventStore
         self.runtime = runtime
-        self.workingDirectory = StudentSandbox.shared.directory(forCourseId: course.id)
+        try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
+        self.workingDirectory = workingDirectory
         self.view = SandboxTerminalProcessView(frame: CGRect(x: 0, y: 0, width: 640, height: 280))
         self.view.coordinator = self
-        // Shrink to fit more rows, and use a dark IDE-style terminal palette.
-        self.view.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        // Small monospaced font on a dark IDE-style palette.
+        self.view.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         self.view.nativeBackgroundColor = Theme.terminalBackgroundNS
-        self.view.nativeForegroundColor = Theme.terminalForegroundNS
+        self.view.nativeForegroundColor = foregroundColor
     }
 
     func start() throws {

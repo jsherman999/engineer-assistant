@@ -13,6 +13,7 @@ final class AppSession: ObservableObject {
     @Published var currentLessonIdx: Int = 0
     @Published var courses: [Course] = []
     @Published var terminal: SandboxTerminalController? = nil
+    @Published var askTerminal: SandboxTerminalController? = nil
     @Published var isChecking: Bool = false
     @Published var challengeOutcome: VerifyOutcome? = nil
     @Published var hintRevealed: Bool = false
@@ -60,8 +61,31 @@ final class AppSession: ObservableObject {
         do {
             let id = try await eventStore.startSession()
             self.sessionId = id
+            startAskTerminal()
         } catch {
             self.lastError = "Failed to start session: \(error.localizedDescription)"
+        }
+    }
+
+    /// A persistent macOS sandbox shell shown beside Ask-mode chat so the student can try the
+    /// commands being described. Same sandbox machinery as course mode, its own scratch dir.
+    private func startAskTerminal() {
+        guard askTerminal == nil, let sessionId else { return }
+        do {
+            let controller = try SandboxTerminalController(
+                courseId: "ask",
+                environment: .macos,
+                workingDirectory: StudentSandbox.shared.askDirectory(),
+                sessionId: sessionId,
+                eventStore: eventStore,
+                runtime: nil,
+                fontSize: 10,
+                foregroundColor: Theme.terminalGreenNS
+            )
+            try controller.start()
+            askTerminal = controller
+        } catch {
+            lastError = "Ask sandbox failed to start: \(error.localizedDescription)"
         }
     }
 
@@ -202,7 +226,9 @@ final class AppSession: ObservableObject {
     private func startController(for course: Course, sessionId: String, runtime: ContainerRuntime?) {
         do {
             let controller = try SandboxTerminalController(
-                course: course,
+                courseId: course.id,
+                environment: course.environment,
+                workingDirectory: StudentSandbox.shared.directory(forCourseId: course.id),
                 sessionId: sessionId,
                 eventStore: eventStore,
                 runtime: runtime
