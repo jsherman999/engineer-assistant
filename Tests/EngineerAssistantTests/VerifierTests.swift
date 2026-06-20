@@ -70,6 +70,31 @@ final class VerifierTests: XCTestCase {
         XCTAssertTrue(out.passed)
     }
 
+    func testFileExistsTrueWithGuessedHomeAbsolutePath() async throws {
+        // A course hardcoded `/Users/student/...`; the file really lives in the sandbox home.
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        try "x".write(to: dir.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        let check = VerifyCheck(type: .fileExists, value: nil, path: "/Users/student/notes.txt", exitCode: nil)
+        let out = await verifier.verify(check, context: context(sandbox: dir))
+        XCTAssertTrue(out.passed)
+    }
+
+    func testFileContainsTrueWithGuessedHomeAbsolutePath() async throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        try "hello world".write(to: dir.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        let check = VerifyCheck(type: .fileContains, value: "hello", path: "/home/student/notes.txt", exitCode: nil)
+        let out = await verifier.verify(check, context: context(sandbox: dir))
+        XCTAssertTrue(out.passed)
+    }
+
+    func testFileExistsFalseForRealSystemPathStaysLiteral() async {
+        // A genuine non-home absolute path must NOT be remapped into the sandbox.
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let check = VerifyCheck(type: .fileExists, value: nil, path: "/usr/bin/definitely-not-here-xyz", exitCode: nil)
+        let out = await verifier.verify(check, context: context(sandbox: dir))
+        XCTAssertFalse(out.passed)
+    }
+
     func testFileExistsFalse() async {
         let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let check = VerifyCheck(type: .fileExists, value: nil, path: "missing.txt", exitCode: nil)

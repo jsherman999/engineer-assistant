@@ -211,9 +211,11 @@ final class ClaudeClient {
     Verify types:
     - exit_code: { "type":"exit_code", "exit_code": N } -- last command's exit code equals N.
     - stdout_regex: { "type":"stdout_regex", "value": "regex" } -- last stdout matches regex.
-    - file_exists: { "type":"file_exists", "path": "/path" } -- file exists in the sandbox.
-    - file_contains: { "type":"file_contains", "path":"/path", "value":"substring" } -- file contains substring.
+    - file_exists: { "type":"file_exists", "path": "~/name" } -- file exists in the sandbox.
+    - file_contains: { "type":"file_contains", "path":"~/name", "value":"substring" } -- file contains substring.
     - llm_judge: { "type":"llm_judge", "value":"criteria" } -- open-ended. Use sparingly.
+
+    All file paths — in the task text, starter_state, and verify checks — MUST be relative to the student's home directory: use `~/name` or a bare `name`. NEVER use an absolute path like `/Users/...` or `/home/...`; the sandbox HOME is a fresh, empty directory whose real location varies.
 
     Aim for deterministic verifications (exit_code, file_exists, file_contains) wherever possible.
     Emit the course via the emit_course tool. Do not include any prose outside the tool call.
