@@ -35,6 +35,7 @@ final class AppSession: ObservableObject {
     private let eventStore: EventStore = JSONLEventStore()
     private let progressStore: ProgressStore = FileProgressStore()
     private let resultsStore: ResultsStore = FileResultsStore()
+    private let commandRunner = AllowlistedCommandRunner()
     private lazy var verifier = Verifier(claude: claude)
 
     func progress(for courseId: String) -> CourseProgress? {
@@ -126,18 +127,45 @@ final class AppSession: ObservableObject {
         let assistantMsg = ChatMessage(role: .assistant, mode: .ask, text: "")
         messages.append(assistantMsg)
         let assistantId = assistantMsg.id
-        let history = messages.dropLast()
+        let history = Array(messages.dropLast())
         do {
-            let stream = claude.streamAskResponse(history: Array(history))
-            for try await chunk in stream {
-                appendChunk(to: assistantId, text: chunk.text)
-            }
-            let finalText = messages.first(where: { $0.id == assistantId })?.text ?? ""
-            await logChatEvent(.chatAssistant, mode: .ask, text: finalText, sessionId: sessionId, courseId: nil)
+            // Agentic: Claude can run read-only commands (gated by the allowlist) to answer with
+            // this Mac's real state, then returns a final answer.
+            let finalText = try await claude.askAgent(history: history, runCommand: { [weak self] command in
+                await self?.runAgentCommand(command, assistantId: assistantId, sessionId: sessionId) ?? ""
+            })
+            let hasCommands = !(messages.first(where: { $0.id == assistantId })?.text.isEmpty ?? true)
+            appendChunk(to: assistantId, text: (hasCommands ? "\n" : "") + finalText)
+            let full = messages.first(where: { $0.id == assistantId })?.text ?? ""
+            await logChatEvent(.chatAssistant, mode: .ask, text: full, sessionId: sessionId, courseId: nil)
         } catch {
             lastError = error.localizedDescription
             appendChunk(to: assistantId, text: "\n\n_Error: \(error.localizedDescription)_")
         }
+    }
+
+    /// Runs an agent-proposed command through the read-only allowlist, surfaces it in the chat
+    /// bubble so the student sees what ran, logs it for the instructor, and returns the output
+    /// to the model.
+    private func runAgentCommand(_ command: String, assistantId: UUID, sessionId: String) async -> String {
+        let result = await commandRunner.run(command)
+        let hasText = !(messages.first(where: { $0.id == assistantId })?.text.isEmpty ?? true)
+        let marker = result.allowed ? "$ \(command)" : "$ \(command)  ⚠︎ refused"
+        appendChunk(to: assistantId, text: (hasText ? "\n" : "") + marker)
+        await logAgentCommand(command: command, output: result.output, allowed: result.allowed, sessionId: sessionId)
+        return result.output
+    }
+
+    private func logAgentCommand(command: String, output: String, allowed: Bool, sessionId: String) async {
+        let event = LogEvent(
+            sessionId: sessionId, timestamp: Date(), type: .agentCommand, courseId: nil, lessonIdx: nil,
+            payload: [
+                "command": AnyCodable(command),
+                "output": AnyCodable(output),
+                "allowed": AnyCodable(allowed)
+            ]
+        )
+        try? await eventStore.append(event)
     }
 
     private func handleCourse(subject: String, sessionId: String) async {

@@ -71,6 +71,9 @@ enum SessionExport {
         case .hintUsed: return "hint revealed"
         case .skipUsed: return "skipped \(e.string("from_panel") ?? "")"
         case .courseGenerated: return "generated course: \(e.string("title") ?? e.string("subject") ?? "?")"
+        case .agentCommand:
+            let mark = (e.bool("allowed") ?? false) ? "" : " [refused]"
+            return "agent ran\(mark): \(e.string("command") ?? "") → \(e.string("output") ?? "")"
         }
     }
 

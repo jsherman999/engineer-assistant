@@ -37,11 +37,98 @@ final class ClaudeClient {
     Be encouraging. Never invent command-line flags or behavior; if you are unsure, say so.
     """
 
+    static let askAgentSystemPrompt = """
+    You are a friendly, patient tutor for a high-school STEM student learning about their new Mac, plus Linux, system administration, and coding. \
+    You can run read-only shell commands on THIS Mac with the run_command tool to answer questions about the actual machine — its IP address, macOS version, disk space, hardware, running processes, and network setup. \
+    When a question depends on this Mac's real state, call run_command and answer with the real value; briefly show the command you used so the student learns it. \
+    Use ONE simple command per call, with no pipes, redirection, or chaining (e.g. `ipconfig getifaddr en0`, `sw_vers`, `system_profiler SPHardwareDataType`). \
+    Only a small allowlist of read-only commands is permitted and you can never modify the system. If a command is refused, tell the student the exact command they could run themselves in Terminal. \
+    If a question doesn't need this Mac's state, just answer normally. Keep answers short and concrete.
+    """
+
+    static var runCommandTool: [String: Any] {
+        [
+            "name": "run_command",
+            "description": "Run ONE read-only shell command on the student's Mac to answer a question about it (IP address, macOS version, disk space, CPU/RAM, processes, network interfaces). One simple command, no pipes/redirection/chaining. Only a read-only allowlist is permitted; a refused command returns an explanation.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "command": ["type": "string", "description": "The single command to run, e.g. 'ipconfig getifaddr en0'."]
+                ],
+                "required": ["command"]
+            ]
+        ]
+    }
+
     private let session: URLSession
     private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
 
     init(session: URLSession = .shared) {
         self.session = session
+    }
+
+    /// One non-streamed POST to /v1/messages, returning the parsed JSON object.
+    private func messagesRequest(body: [String: Any]) async throws -> [String: Any] {
+        guard let apiKey = Keychain.get(KeychainKeys.anthropicAPIKey), !apiKey.isEmpty else {
+            throw ClaudeError.missingAPIKey
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.timeoutInterval = 180
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ClaudeError.httpError(0, "no response") }
+        if http.statusCode != 200 {
+            throw ClaudeError.httpError(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ClaudeError.decodingError
+        }
+        return obj
+    }
+
+    /// Ask Mode agent: runs the tool-use loop, executing each requested command via `runCommand`
+    /// (which the caller gates through the read-only allowlist), until Claude produces a final
+    /// answer. Returns that answer's text.
+    func askAgent(
+        history: [ChatMessage],
+        runCommand: @escaping (String) async -> String,
+        maxIterations: Int = 8,
+        model: String = defaultModel
+    ) async throws -> String {
+        var messages: [[String: Any]] = history.map { ["role": $0.role.rawValue, "content": $0.text] }
+
+        for _ in 0..<maxIterations {
+            let body: [String: Any] = [
+                "model": model,
+                "max_tokens": 1024,
+                "system": Self.askAgentSystemPrompt,
+                "tools": [Self.runCommandTool],
+                "messages": messages
+            ]
+            let obj = try await messagesRequest(body: body)
+            guard let content = obj["content"] as? [[String: Any]] else { throw ClaudeError.decodingError }
+            messages.append(["role": "assistant", "content": content])
+
+            if (obj["stop_reason"] as? String) == "tool_use" {
+                var results: [[String: Any]] = []
+                for block in content where (block["type"] as? String) == "tool_use" {
+                    let id = block["id"] as? String ?? ""
+                    let command = (block["input"] as? [String: Any])?["command"] as? String ?? ""
+                    let output = await runCommand(command)
+                    results.append(["type": "tool_result", "tool_use_id": id, "content": output])
+                }
+                messages.append(["role": "user", "content": results])
+                continue
+            }
+
+            return content.compactMap { ($0["type"] as? String) == "text" ? $0["text"] as? String : nil }.joined()
+        }
+        return "I ran several commands but couldn't wrap up — try asking a bit more specifically."
     }
 
     func streamAskResponse(

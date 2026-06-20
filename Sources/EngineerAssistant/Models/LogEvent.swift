@@ -16,6 +16,7 @@ enum EventType: String, Codable {
     case hintUsed = "hint_used"
     case skipUsed = "skip_used"
     case courseGenerated = "course_generated"
+    case agentCommand = "agent_command"
 }
 
 struct LogEvent: Codable {
