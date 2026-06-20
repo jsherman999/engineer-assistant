@@ -120,7 +120,7 @@ final class SandboxTerminalController: ObservableObject {
             ],
             currentDirectory: workingDirectory.path
         )
-        statusMessage = "Sandboxed zsh — writes confined to \(workingDirectory.lastPathComponent)/, network blocked."
+        statusMessage = "Sandboxed zsh — writes confined to \(workingDirectory.lastPathComponent)/; network allowed."
     }
 
     /// Ask mode: a full, unsandboxed shell in the user's real home with network and package

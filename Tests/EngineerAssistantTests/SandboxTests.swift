@@ -7,7 +7,8 @@ final class SandboxTests: XCTestCase {
         XCTAssertTrue(profile.contains("(version 1)"))
         XCTAssertTrue(profile.contains("(allow default)"))
         XCTAssertTrue(profile.contains("(deny file-write*)"))
-        XCTAssertTrue(profile.contains("(deny network*)"))
+        // Network is allowed (so brew/curl/git work); only writes are confined.
+        XCTAssertFalse(profile.contains("(deny network*)"))
         XCTAssertTrue(profile.contains("(subpath \"/tmp/my-sandbox\")"))
         XCTAssertFalse(profile.contains("@SANDBOX_DIR@"))
     }

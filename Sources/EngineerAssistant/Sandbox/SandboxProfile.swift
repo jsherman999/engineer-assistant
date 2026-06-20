@@ -20,8 +20,10 @@ enum SandboxProfile {
           (literal "/dev/stderr")
           (literal "/dev/dtracehelper"))
 
-        ;; No network at all (DNS, sockets, etc.).
-        (deny network*)
+        ;; Network is allowed (via allow default) so teaching tools that fetch data —
+        ;; brew info/search, curl, git, dig — work. The student still can't modify the real
+        ;; system: writes stay confined to the sandbox dir, so e.g. `brew install` (which writes
+        ;; to /opt/homebrew) is still blocked.
         """
     }
 }
