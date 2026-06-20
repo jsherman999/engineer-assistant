@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jsherman.engineerassistant.autodeploy</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Users/jay/engineer-assistant/scripts/install-launchd.sh</string>
+    </array>
+    <!-- Fire whenever a build rewrites the dev binary; install-launchd.sh pushes it to bin/. -->
+    <key>WatchPaths</key>
+    <array>
+        <string>/Users/jay/engineer-assistant/.build/debug/EngineerAssistant</string>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/tmp/engineerassistant.autodeploy.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/engineerassistant.autodeploy.log</string>
+</dict>
+</plist>
