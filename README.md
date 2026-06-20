@@ -70,6 +70,7 @@ EA_RUN_CONTAINER_TESTS=1 swift test --filter ContainerIntegrationTests
 ~/Library/Application Support/EngineerAssistant/
 ├── events.jsonl        -- append-only chat + shell + lesson event log
 ├── progress.json       -- per-course resume point
+├── results.json        -- per-course/lesson saved challenge results (attempts kept across retakes)
 ├── courses/            -- generated, cached course JSON
 └── sandboxes/<id>/     -- per-course macOS sandbox working dirs
 ```

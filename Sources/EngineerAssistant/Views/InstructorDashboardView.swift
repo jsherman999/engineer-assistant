@@ -2,10 +2,28 @@ import SwiftUI
 import AppKit
 
 struct InstructorDashboardView: View {
+    enum Mode: String, CaseIterable, Identifiable { case sessions = "Sessions", results = "Course Results"; var id: String { rawValue } }
+
+    @State private var mode: Mode = .sessions
     @State private var sessions: [InstructorSession] = []
     @State private var selected: InstructorSession.ID?
 
     var body: some View {
+        VStack(spacing: 0) {
+            Picker("View", selection: $mode) {
+                ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(8)
+            Divider()
+            switch mode {
+            case .sessions: sessionsView
+            case .results: CourseResultsBrowser()
+            }
+        }
+    }
+
+    private var sessionsView: some View {
         NavigationSplitView {
             List(sessions, selection: $selected) { session in
                 sessionRow(session).tag(session.id)
@@ -198,5 +216,80 @@ private struct SessionDetailView: View {
         } catch {
             exportNote = "Export failed: \(error.localizedDescription)"
         }
+    }
+}
+
+/// Per-course gradebook read straight from the persistent results store.
+private struct CourseResultsBrowser: View {
+    @State private var courses: [CourseResults] = []
+    @State private var selected: String?
+
+    var body: some View {
+        NavigationSplitView {
+            List(courses, id: \.courseId, selection: $selected) { course in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(course.title).font(.subheadline.bold())
+                    Text("✓ \(course.passedCount)/\(course.lessonCount) · attempt \(course.currentAttempt)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 2)
+                .tag(course.courseId)
+            }
+            .navigationTitle("Courses")
+            .frame(minWidth: 220)
+        } detail: {
+            if let id = selected, let course = courses.first(where: { $0.courseId == id }) {
+                CourseResultsDetail(results: course)
+            } else if courses.isEmpty {
+                Text("No saved lesson results yet.").foregroundStyle(.secondary)
+            } else {
+                Text("Select a course.").foregroundStyle(.secondary)
+            }
+        }
+        .onAppear {
+            courses = FileResultsStore().all()
+            selected = selected ?? courses.first?.courseId
+        }
+    }
+}
+
+private struct CourseResultsDetail: View {
+    let results: CourseResults
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(results.title).font(.headline)
+                Text("Attempt \(results.currentAttempt) · \(results.passedCount)/\(results.lessonCount) lessons passed · \(results.attempts.count) total checks")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(sortedAttempts) { a in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: a.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(a.passed ? .green : .orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Lesson \(a.lessonIdx + 1): \(a.lessonTitle)").font(.caption.bold())
+                                Text("attempt \(a.attempt) · \(a.timestamp.formatted(date: .abbreviated, time: .shortened))\(a.hintUsed ? " · used hint" : "")")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                                if !a.command.isEmpty {
+                                    Text("$ \(a.command)").font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                                }
+                                Text(a.detail).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    private var sortedAttempts: [LessonAttempt] {
+        results.attempts.sorted { $0.timestamp > $1.timestamp }
     }
 }

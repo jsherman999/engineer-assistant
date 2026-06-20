@@ -4,6 +4,7 @@ protocol CourseStore {
     func load(subject: String) -> Course?
     func save(_ course: Course) throws
     func listAll() -> [Course]
+    func delete(_ course: Course) throws
 }
 
 struct FileCourseStore: CourseStore {
@@ -50,6 +51,14 @@ struct FileCourseStore: CourseStore {
                   let data = try? Data(contentsOf: url) else { return nil }
             return try? decoder.decode(Course.self, from: data)
         }.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func delete(_ course: Course) throws {
+        let slug = CourseSubject.slug(for: course.subject)
+        let url = url(forSlug: slug)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 }
 

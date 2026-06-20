@@ -245,6 +245,29 @@ struct CoursePlayerView: View {
                     }
                 }
             }
+
+            savedResult
+        }
+    }
+
+    @ViewBuilder
+    private var savedResult: some View {
+        // Reading resultsRevision keeps this fresh after a check or a clear.
+        let _ = session.resultsRevision
+        if let results = session.results(for: course.id),
+           let latest = results.latest(lessonIdx: session.currentLessonIdx, attempt: results.currentAttempt) {
+            Divider().padding(.vertical, 2)
+            HStack(spacing: 8) {
+                Label(latest.passed ? "Saved: passed" : "Saved: not yet",
+                      systemImage: latest.passed ? "checkmark.seal" : "clock.arrow.circlepath")
+                    .font(.caption).foregroundStyle(latest.passed ? .green : .secondary)
+                Text("attempt \(latest.attempt)").font(.caption2).foregroundStyle(.tertiary)
+                Spacer()
+                Button("Clear this lesson's results") {
+                    session.clearLessonResults(courseId: course.id, lessonIdx: session.currentLessonIdx)
+                }
+                .font(.caption).buttonStyle(.borderless)
+            }
         }
     }
 

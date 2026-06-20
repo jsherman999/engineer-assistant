@@ -23,16 +23,27 @@ final class AppSession: ObservableObject {
     @Published var showLessonChat: Bool = false
     @Published var lessonChat: [ChatMessage] = []
     @Published var lessonChatSending: Bool = false
+    /// Bumped whenever saved lesson results change, so result views re-render.
+    @Published private(set) var resultsRevision: Int = 0
 
     private let claude = ClaudeClient()
     private let courseGenerator = CourseGenerator()
     private let courseStore: CourseStore = FileCourseStore()
     private let eventStore: EventStore = JSONLEventStore()
     private let progressStore: ProgressStore = FileProgressStore()
+    private let resultsStore: ResultsStore = FileResultsStore()
     private lazy var verifier = Verifier(claude: claude)
 
     func progress(for courseId: String) -> CourseProgress? {
         progressStore.progress(for: courseId)
+    }
+
+    func results(for courseId: String) -> CourseResults? {
+        resultsStore.results(for: courseId)
+    }
+
+    func allResults() -> [CourseResults] {
+        resultsStore.all()
     }
 
     /// True while Claude is generating a course (initial generation or regenerate).
@@ -238,12 +249,64 @@ final class AppSession: ObservableObject {
             let outcome = await verifier.verify(challenge.verify, context: context)
             challengeOutcome = outcome
             isChecking = false
+            recordResult(course: course, idx: idx, outcome: outcome, command: command)
             if outcome.passed {
                 await logChallengeResult(.challengePass, course: course, idx: idx, verify: challenge.verify, detail: outcome.detail, sessionId: sessionId)
             } else {
                 await logChallengeResult(.challengeFail, course: course, idx: idx, verify: challenge.verify, detail: outcome.detail, sessionId: sessionId)
             }
         }
+    }
+
+    /// Saves a structured per-lesson result for later review by the student or instructor.
+    private func recordResult(course: Course, idx: Int, outcome: VerifyOutcome, command: String) {
+        guard idx < course.lessons.count else { return }
+        let attemptNum = resultsStore.results(for: course.id)?.currentAttempt ?? 1
+        let record = LessonAttempt(
+            id: UUID().uuidString,
+            attempt: attemptNum,
+            lessonIdx: idx,
+            lessonTitle: course.lessons[idx].title,
+            passed: outcome.passed,
+            detail: outcome.detail,
+            command: command,
+            hintUsed: hintRevealed,
+            timestamp: Date()
+        )
+        resultsStore.record(record, courseId: course.id, subject: course.subject, title: course.title, lessonCount: course.lessons.count)
+        resultsRevision += 1
+    }
+
+    /// Restarts a course from the first lesson, keeping prior results as a new attempt.
+    func retakeCourse(_ course: Course) {
+        resultsStore.startNewAttempt(courseId: course.id, subject: course.subject, title: course.title, lessonCount: course.lessons.count)
+        progressStore.set(CourseProgress(lessonIdx: 0, completed: false), for: course.id)
+        resultsRevision += 1
+        openCourse(course)
+    }
+
+    /// Clears the saved results for one lesson so it can be re-taken cleanly.
+    func clearLessonResults(courseId: String, lessonIdx: Int) {
+        resultsStore.clearLesson(courseId: courseId, lessonIdx: lessonIdx)
+        resultsRevision += 1
+    }
+
+    /// Purges a course and everything tied to it: cached JSON, progress, results, and sandbox.
+    func deleteCourse(_ course: Course) {
+        if activeCourse?.id == course.id {
+            terminal?.stop()
+            terminal = nil
+            activeCourse = nil
+            currentLessonIdx = 0
+            resetChallengeState()
+        }
+        try? courseStore.delete(course)
+        progressStore.remove(courseId: course.id)
+        resultsStore.remove(courseId: course.id)
+        let sandboxDir = AppPaths.sandboxesDir.appendingPathComponent(course.id, isDirectory: true)
+        try? FileManager.default.removeItem(at: sandboxDir)
+        courses = courseStore.listAll()
+        resultsRevision += 1
     }
 
     func revealHint() {

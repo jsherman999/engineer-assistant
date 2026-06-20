@@ -18,6 +18,10 @@ enum AppPaths {
         appSupport.appendingPathComponent("progress.json")
     }
 
+    static var resultsFile: URL {
+        appSupport.appendingPathComponent("results.json")
+    }
+
     static var coursesDir: URL {
         let dir = appSupport.appendingPathComponent("courses", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
