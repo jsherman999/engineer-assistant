@@ -1,11 +1,11 @@
 import SwiftUI
 
 /// Lists cached courses so the student can reopen one and resume at the saved lesson,
-/// review saved results, retake from the start, or purge a course entirely.
+/// review saved results, or retake from the start. Deleting courses is instructor-only
+/// (see the instructor dashboard).
 struct CourseLibraryView: View {
     @EnvironmentObject var session: AppSession
     @Environment(\.dismiss) private var dismiss
-    @State private var pendingDelete: Course?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -33,16 +33,6 @@ struct CourseLibraryView: View {
         }
         .padding(20)
         .frame(width: 560, height: 480)
-        .alert("Delete this course?", isPresented: deleteAlertBinding, presenting: pendingDelete) { course in
-            Button("Delete", role: .destructive) { session.deleteCourse(course) }
-            Button("Cancel", role: .cancel) {}
-        } message: { course in
-            Text("“\(course.title)” and its saved progress and results will be permanently removed.")
-        }
-    }
-
-    private var deleteAlertBinding: Binding<Bool> {
-        Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
     }
 
     private func row(for course: Course) -> some View {
@@ -93,11 +83,6 @@ struct CourseLibraryView: View {
                         }
                         .font(.caption)
                     }
-                    Button(role: .destructive) { pendingDelete = course } label: {
-                        Label("Delete", systemImage: "trash").font(.caption)
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.red)
                 }
             }
 

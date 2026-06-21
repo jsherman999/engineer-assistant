@@ -417,6 +417,25 @@ final class AppSession: ObservableObject {
         resultsRevision += 1
     }
 
+    /// Purges a course by id (instructor dashboard, which works from course ids). Falls back to
+    /// removing any residual progress/results/sandbox if the course JSON is already gone.
+    func deleteCourse(courseId: String) {
+        if let course = courses.first(where: { $0.id == courseId }) {
+            deleteCourse(course)
+            return
+        }
+        progressStore.remove(courseId: courseId)
+        resultsStore.remove(courseId: courseId)
+        StudentSandbox.shared.remove(forCourseId: courseId)
+        resultsRevision += 1
+    }
+
+    /// Clears all saved results (the gradebook) for a course while keeping the course itself.
+    func deleteCourseHistory(courseId: String) {
+        resultsStore.remove(courseId: courseId)
+        resultsRevision += 1
+    }
+
     func revealHint() {
         guard let course = activeCourse, let sessionId, currentLessonIdx < course.lessons.count else { return }
         hintRevealed = true

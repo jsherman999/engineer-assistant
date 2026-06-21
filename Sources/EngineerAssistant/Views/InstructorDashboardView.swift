@@ -219,77 +219,142 @@ private struct SessionDetailView: View {
     }
 }
 
-/// Per-course gradebook read straight from the persistent results store.
+/// Per-course gradebook driven by the full course list, so the instructor can review
+/// results and delete a course's history or the course itself.
 private struct CourseResultsBrowser: View {
-    @State private var courses: [CourseResults] = []
+    @EnvironmentObject var session: AppSession
     @State private var selected: String?
+    @State private var pendingHistoryDelete: Course?
+    @State private var pendingCourseDelete: Course?
 
     var body: some View {
+        // Reading resultsRevision refreshes the list/detail after a delete.
+        let _ = session.resultsRevision
         NavigationSplitView {
-            List(courses, id: \.courseId, selection: $selected) { course in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(course.title).font(.subheadline.bold())
-                    Text("✓ \(course.passedCount)/\(course.lessonCount) · attempt \(course.currentAttempt)")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 2)
-                .tag(course.courseId)
+            List(session.courses, id: \.id, selection: $selected) { course in
+                courseRow(course).tag(course.id)
             }
             .navigationTitle("Courses")
             .frame(minWidth: 220)
         } detail: {
-            if let id = selected, let course = courses.first(where: { $0.courseId == id }) {
-                CourseResultsDetail(results: course)
-            } else if courses.isEmpty {
-                Text("No saved lesson results yet.").foregroundStyle(.secondary)
+            if let id = selected, let course = session.courses.first(where: { $0.id == id }) {
+                CourseResultsDetail(
+                    course: course,
+                    results: session.results(for: course.id),
+                    onDeleteHistory: { pendingHistoryDelete = course },
+                    onDeleteCourse: { pendingCourseDelete = course }
+                )
+            } else if session.courses.isEmpty {
+                Text("No courses yet.").foregroundStyle(.secondary)
             } else {
                 Text("Select a course.").foregroundStyle(.secondary)
             }
         }
-        .onAppear {
-            courses = FileResultsStore().all()
-            selected = selected ?? courses.first?.courseId
+        .alert("Delete course history?", isPresented: historyAlertBinding, presenting: pendingHistoryDelete) { course in
+            Button("Delete History", role: .destructive) { session.deleteCourseHistory(courseId: course.id) }
+            Button("Cancel", role: .cancel) {}
+        } message: { course in
+            Text("All saved lesson results for “\(course.title)” will be permanently removed. The course itself is kept.")
         }
+        .alert("Delete course?", isPresented: courseAlertBinding, presenting: pendingCourseDelete) { course in
+            Button("Delete Course", role: .destructive) {
+                session.deleteCourse(courseId: course.id)
+                if selected == course.id { selected = nil }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { course in
+            Text("“\(course.title)” and its saved progress and results will be permanently removed.")
+        }
+    }
+
+    private var historyAlertBinding: Binding<Bool> {
+        Binding(get: { pendingHistoryDelete != nil }, set: { if !$0 { pendingHistoryDelete = nil } })
+    }
+
+    private var courseAlertBinding: Binding<Bool> {
+        Binding(get: { pendingCourseDelete != nil }, set: { if !$0 { pendingCourseDelete = nil } })
+    }
+
+    private func courseRow(_ course: Course) -> some View {
+        let results = session.results(for: course.id)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(course.title).font(.subheadline.bold())
+            if let results {
+                Text("✓ \(results.passedCount)/\(course.lessons.count) · attempt \(results.currentAttempt)")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("\(course.lessons.count) lessons · no results yet")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 
 private struct CourseResultsDetail: View {
-    let results: CourseResults
+    let course: Course
+    let results: CourseResults?
+    let onDeleteHistory: () -> Void
+    let onDeleteCourse: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(results.title).font(.headline)
-                Text("Attempt \(results.currentAttempt) · \(results.passedCount)/\(results.lessonCount) lessons passed · \(results.attempts.count) total checks")
-                    .font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(course.title).font(.headline)
+                    if let results, !results.attempts.isEmpty {
+                        Text("Attempt \(results.currentAttempt) · \(results.passedCount)/\(course.lessons.count) lessons passed · \(results.attempts.count) total checks")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("\(course.lessons.count) lessons · no results yet")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                HStack(spacing: 8) {
+                    Button(role: .destructive, action: onDeleteHistory) {
+                        Label("Delete History", systemImage: "trash")
+                    }
+                    .disabled(results?.attempts.isEmpty ?? true)
+                    Button(role: .destructive, action: onDeleteCourse) {
+                        Label("Delete Course", systemImage: "trash.fill")
+                    }
+                }
             }
             .padding(12)
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(sortedAttempts) { a in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: a.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(a.passed ? .green : .orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Lesson \(a.lessonIdx + 1): \(a.lessonTitle)").font(.caption.bold())
-                                Text("attempt \(a.attempt) · \(a.timestamp.formatted(date: .abbreviated, time: .shortened))\(a.hintUsed ? " · used hint" : "")")
-                                    .font(.caption2).foregroundStyle(.tertiary)
-                                if !a.command.isEmpty {
-                                    Text("$ \(a.command)").font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+            if let results, !results.attempts.isEmpty {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(sortedAttempts(results)) { a in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: a.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(a.passed ? .green : .orange)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Lesson \(a.lessonIdx + 1): \(a.lessonTitle)").font(.caption.bold())
+                                    Text("attempt \(a.attempt) · \(a.timestamp.formatted(date: .abbreviated, time: .shortened))\(a.hintUsed ? " · used hint" : "")")
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                    if !a.command.isEmpty {
+                                        Text("$ \(a.command)").font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                                    }
+                                    Text(a.detail).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
                                 }
-                                Text(a.detail).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .padding(12)
                 }
-                .padding(12)
+            } else {
+                Text("No saved lesson results yet.")
+                    .foregroundStyle(.secondary)
+                    .padding(12)
+                Spacer()
             }
         }
     }
 
-    private var sortedAttempts: [LessonAttempt] {
+    private func sortedAttempts(_ results: CourseResults) -> [LessonAttempt] {
         results.attempts.sorted { $0.timestamp > $1.timestamp }
     }
 }

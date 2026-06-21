@@ -53,6 +53,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $showingInstructor) {
             InstructorGateView()
+                .environmentObject(session)
         }
         .background(
             // Hidden entry to the instructor dashboard (⌘⇧I); no visible control for the student.
