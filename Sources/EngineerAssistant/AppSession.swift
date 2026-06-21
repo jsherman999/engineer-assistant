@@ -207,7 +207,7 @@ final class AppSession: ObservableObject {
     private func containerGuidance() -> String? {
         switch containerRuntime?.engine {
         case .apple:
-            return "Container CLI note: this Mac uses Apple's `container` tool, which is NOT Docker-compatible at the top level. Image commands are subcommands of `container image` — e.g. `container image pull alpine:latest`, `container image list` (alias `container image ls`). Run a container with `container run`. NEVER use `container pull`, `container images`, or any `docker`/`podman` command."
+            return "Container CLI note: this Mac uses Apple's `container` tool, which is NOT Docker-compatible at the top level. Image commands are subcommands of `container image` — e.g. `container image pull alpine:latest`, `container image list` (alias `container image ls`). Run a container with `container run`. NEVER use `container pull`, `container images`, or any `docker`/`podman` command. In demos, make expected_output match Apple `container`'s real format, which differs from Docker: `container image list` prints only the columns `NAME  TAG  DIGEST` (no IMAGE ID / CREATED / SIZE); `container list` (running containers) prints `ID  IMAGE  OS  ARCH  STATE  ADDR`."
         case .podman:
             return "Container CLI note: this Mac uses Podman (Docker-compatible). Use `podman pull`, `podman images`, `podman run`."
         case .docker:
