@@ -356,17 +356,6 @@ struct CoursePlayerView: View {
                 Label("Exit Course", systemImage: "xmark")
             }
 
-            Spacer()
-
-            Button {
-                session.showLessonChat.toggle()
-            } label: {
-                Label("Ask Claude", systemImage: "bubble.left.and.text.bubble.right")
-            }
-            .help("Ask Claude a question about this lesson")
-
-            lessonBadge
-
             Button {
                 session.nextLesson()
             } label: {
@@ -384,6 +373,17 @@ struct CoursePlayerView: View {
                     withAnimation(.easeOut(duration: 0.2)) { nextPulse = false }
                 }
             }
+
+            lessonBadge
+
+            Spacer()
+
+            Button {
+                session.showLessonChat.toggle()
+            } label: {
+                Label("Ask Claude", systemImage: "bubble.left.and.text.bubble.right")
+            }
+            .help("Ask Claude a question about this lesson")
         }
         .padding(12)
         .background(Theme.bar)
