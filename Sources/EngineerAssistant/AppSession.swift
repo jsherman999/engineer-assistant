@@ -54,6 +54,7 @@ final class AppSession: ObservableObject {
     private let courseGenerator = CourseGenerator()
     private let courseStore: CourseStore = FileCourseStore()
     private let eventStore: EventStore = JSONLEventStore()
+    private lazy var events = EventLogger(store: eventStore)
     private let progressStore: ProgressStore = FileProgressStore()
     private let resultsStore: ResultsStore = FileResultsStore()
     private let commandRunner = AllowlistedCommandRunner()
@@ -190,7 +191,7 @@ final class AppSession: ObservableObject {
                 isSending = false
                 return
             }
-            await logChatEvent(.chatUser, mode: mode, text: trimmed, sessionId: sessionId, courseId: nil)
+            await events.chat(.chatUser, mode: mode, text: trimmed, sessionId: sessionId, courseId: nil)
             if mode == .ask {
                 await handleAsk(sessionId: sessionId)
             } else {
@@ -216,14 +217,19 @@ final class AppSession: ObservableObject {
         let history = Array(messages.dropLast())
         do {
             // Agentic: Claude can run read-only commands (gated by the allowlist) to answer with
-            // this Mac's real state, then returns a final answer.
-            let finalText = try await claude.askAgent(history: history, runCommand: { [weak self] command in
-                await self?.runAgentCommand(command, assistantId: assistantId, sessionId: sessionId) ?? ""
-            })
-            let hasCommands = !(messages.first(where: { $0.id == assistantId })?.text.isEmpty ?? true)
-            appendChunk(to: assistantId, text: (hasCommands ? "\n" : "") + finalText)
+            // this Mac's real state. Text streams in as it is written, so the student watches the
+            // answer form rather than a spinner.
+            try await claude.askAgent(
+                history: history,
+                runCommand: { [weak self] command in
+                    await self?.runAgentCommand(command, assistantId: assistantId, sessionId: sessionId) ?? ""
+                },
+                onText: { [weak self] chunk in
+                    self?.appendChunk(to: assistantId, text: chunk)
+                }
+            )
             let full = messages.first(where: { $0.id == assistantId })?.text ?? ""
-            await logChatEvent(.chatAssistant, mode: .ask, text: full, sessionId: sessionId, courseId: nil)
+            await events.chat(.chatAssistant, mode: .ask, text: full, sessionId: sessionId, courseId: nil)
         } catch {
             lastError = error.localizedDescription
             appendChunk(to: assistantId, text: "\n\n_Error: \(error.localizedDescription)_")
@@ -238,20 +244,8 @@ final class AppSession: ObservableObject {
         let hasText = !(messages.first(where: { $0.id == assistantId })?.text.isEmpty ?? true)
         let marker = result.allowed ? "$ \(command)" : "$ \(command)  ⚠︎ refused"
         appendChunk(to: assistantId, text: (hasText ? "\n" : "") + marker)
-        await logAgentCommand(command: command, output: result.output, allowed: result.allowed, sessionId: sessionId)
+        await events.agentCommand(command: command, output: result.output, allowed: result.allowed, sessionId: sessionId)
         return result.output
-    }
-
-    private func logAgentCommand(command: String, output: String, allowed: Bool, sessionId: String) async {
-        let event = LogEvent(
-            sessionId: sessionId, timestamp: Date(), type: .agentCommand, courseId: nil, lessonIdx: nil,
-            payload: [
-                "command": AnyCodable(command),
-                "output": AnyCodable(output),
-                "allowed": AnyCodable(allowed)
-            ]
-        )
-        try? await eventStore.append(event)
     }
 
     private func handleCourse(subject: String, sessionId: String) async {
@@ -259,14 +253,14 @@ final class AppSession: ObservableObject {
             let result = try await courseGenerator.generate(subject: subject, containerGuidance: containerGuidance())
             let course = result.course
 
-            await logCourseGenerated(course: course, wasCached: result.wasCached, sessionId: sessionId)
+            await events.courseGenerated(course: course, wasCached: result.wasCached, sessionId: sessionId)
 
             let summary = result.wasCached
                 ? "Loaded cached course: **\(course.title)** — \(course.lessons.count) lessons."
                 : "Generated course: **\(course.title)** — \(course.lessons.count) lessons."
             let reply = ChatMessage(role: .assistant, mode: .course, text: summary)
             messages.append(reply)
-            await logChatEvent(.chatAssistant, mode: .course, text: summary, sessionId: sessionId, courseId: course.id)
+            await events.chat(.chatAssistant, mode: .course, text: summary, sessionId: sessionId, courseId: course.id)
 
             courses = courseStore.listAll()
             openCourse(course)
@@ -302,7 +296,7 @@ final class AppSession: ObservableObject {
         let idx = currentLessonIdx
         Task {
             guard let sessionId else { return }
-            await logLessonStart(course: course, idx: idx, sessionId: sessionId)
+            await events.lessonStart(course: course, idx: idx, sessionId: sessionId)
         }
     }
 
@@ -316,7 +310,7 @@ final class AppSession: ObservableObject {
         }
         saveProgress(course: course)
         Task {
-            await logLessonComplete(course: course, idx: currentLessonIdx, sessionId: sessionId, finished: false)
+            await events.lessonComplete(course: course, idx: currentLessonIdx, finished: false, sessionId: sessionId)
         }
         activeCourse = nil
         currentLessonIdx = 0
@@ -388,8 +382,8 @@ final class AppSession: ObservableObject {
         saveProgress(course: course)
         Task {
             guard let sessionId else { return }
-            await logLessonComplete(course: course, idx: prevIdx, sessionId: sessionId, finished: true)
-            await logLessonStart(course: course, idx: nextIdx, sessionId: sessionId)
+            await events.lessonComplete(course: course, idx: prevIdx, finished: true, sessionId: sessionId)
+            await events.lessonStart(course: course, idx: nextIdx, sessionId: sessionId)
         }
     }
 
@@ -402,7 +396,7 @@ final class AppSession: ObservableObject {
         let idx = currentLessonIdx
         Task {
             guard let sessionId else { return }
-            await logLessonStart(course: course, idx: idx, sessionId: sessionId)
+            await events.lessonStart(course: course, idx: idx, sessionId: sessionId)
         }
     }
 
@@ -415,7 +409,7 @@ final class AppSession: ObservableObject {
         saveProgress(course: course)
         Task {
             guard let sessionId else { return }
-            await logLessonStart(course: course, idx: idx, sessionId: sessionId)
+            await events.lessonStart(course: course, idx: idx, sessionId: sessionId)
         }
     }
 
@@ -423,7 +417,7 @@ final class AppSession: ObservableObject {
     func skipCurrentLesson() {
         guard let course = activeCourse, let sessionId, currentLessonIdx < course.lessons.count else { return }
         let idx = currentLessonIdx
-        Task { await logSkipUsed(course: course, idx: idx, panel: "challenge", sessionId: sessionId) }
+        Task { await events.skipUsed(course: course, idx: idx, panel: "challenge", sessionId: sessionId) }
         if idx < course.lessons.count - 1 {
             nextLesson()
         }
@@ -513,14 +507,14 @@ final class AppSession: ObservableObject {
         let command = terminal.lastCommand ?? ""
 
         Task {
-            await logChallengeAttempt(course: course, idx: idx, command: command, sessionId: sessionId)
+            await events.challengeAttempt(course: course, idx: idx, command: command, sessionId: sessionId)
             let outcome = await verifier.verify(challenge.verify, context: context)
             setOutcome(outcome)
             setChecking(false)
             recordResult(course: course, idx: idx, title: title, outcome: outcome, command: command)
-            await logChallengeResult(outcome.passed ? .challengePass : .challengeFail,
-                                     course: course, idx: idx, verify: challenge.verify,
-                                     detail: outcome.detail, sessionId: sessionId)
+            await events.challengeResult(passed: outcome.passed, course: course, idx: idx,
+                                         verify: challenge.verify, detail: outcome.detail,
+                                         sessionId: sessionId)
         }
     }
 
@@ -611,7 +605,7 @@ final class AppSession: ObservableObject {
             }
             hintText = text
             hintLoading = false
-            await logHintUsed(course: course, idx: idx, text: text, sessionId: sessionId)
+            await events.hintUsed(course: course, idx: idx, text: text, sessionId: sessionId)
         }
     }
 
@@ -648,13 +642,13 @@ final class AppSession: ObservableObject {
         let history = Array(lessonChat.dropLast())
 
         Task {
-            await logChatEvent(.chatUser, mode: .ask, text: trimmed, sessionId: sessionId, courseId: course.id, lessonIdx: idx)
+            await events.chat(.chatUser, mode: .ask, text: trimmed, sessionId: sessionId, courseId: course.id, lessonIdx: idx)
             do {
                 for try await chunk in claude.streamAskResponse(history: history, contextPreamble: preamble) {
                     appendLessonChunk(to: assistantId, text: chunk.text)
                 }
                 let finalText = lessonChat.first(where: { $0.id == assistantId })?.text ?? ""
-                await logChatEvent(.chatAssistant, mode: .ask, text: finalText, sessionId: sessionId, courseId: course.id, lessonIdx: idx)
+                await events.chat(.chatAssistant, mode: .ask, text: finalText, sessionId: sessionId, courseId: course.id, lessonIdx: idx)
             } catch {
                 appendLessonChunk(to: assistantId, text: "\n\n_Error: \(error.localizedDescription)_")
             }
@@ -674,7 +668,7 @@ final class AppSession: ObservableObject {
         Task {
             do {
                 let result = try await courseGenerator.generate(subject: subject, forceRefresh: true, containerGuidance: containerGuidance())
-                await logCourseGenerated(course: result.course, wasCached: false, sessionId: sessionId)
+                await events.courseGenerated(course: result.course, wasCached: false, sessionId: sessionId)
                 courses = courseStore.listAll()
                 isRegenerating = false
                 openCourse(result.course)
@@ -690,117 +684,4 @@ final class AppSession: ObservableObject {
         messages[idx].text += text
     }
 
-    private func logChatEvent(_ type: EventType, mode: ChatMode, text: String, sessionId: String, courseId: String?, lessonIdx: Int? = nil) async {
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: type,
-            courseId: courseId,
-            lessonIdx: lessonIdx,
-            payload: [
-                "text": AnyCodable(text),
-                "mode": AnyCodable(mode.rawValue)
-            ]
-        )
-        try? await eventStore.append(event)
-    }
-
-    private func logCourseGenerated(course: Course, wasCached: Bool, sessionId: String) async {
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: .courseGenerated,
-            courseId: course.id,
-            lessonIdx: nil,
-            payload: [
-                "subject": AnyCodable(course.subject),
-                "title": AnyCodable(course.title),
-                "environment": AnyCodable(course.environment.rawValue),
-                "lesson_count": AnyCodable(course.lessons.count),
-                "was_cached": AnyCodable(wasCached)
-            ]
-        )
-        try? await eventStore.append(event)
-    }
-
-    private func logLessonStart(course: Course, idx: Int, sessionId: String) async {
-        guard idx < course.lessons.count else { return }
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: .lessonStart,
-            courseId: course.id,
-            lessonIdx: idx,
-            payload: ["lesson_title": AnyCodable(course.lessons[idx].title)]
-        )
-        try? await eventStore.append(event)
-    }
-
-    private func logChallengeAttempt(course: Course, idx: Int, command: String, sessionId: String) async {
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: .challengeAttempt,
-            courseId: course.id,
-            lessonIdx: idx,
-            payload: ["command": AnyCodable(command)]
-        )
-        try? await eventStore.append(event)
-    }
-
-    private func logChallengeResult(_ type: EventType, course: Course, idx: Int, verify: VerifyCheck, detail: String, sessionId: String) async {
-        let detailKey = type == .challengePass ? "evidence" : "reason"
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: type,
-            courseId: course.id,
-            lessonIdx: idx,
-            payload: [
-                "verify_type": AnyCodable(verify.type.rawValue),
-                detailKey: AnyCodable(detail)
-            ]
-        )
-        try? await eventStore.append(event)
-    }
-
-    private func logHintUsed(course: Course, idx: Int, text: String, sessionId: String) async {
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: .hintUsed,
-            courseId: course.id,
-            lessonIdx: idx,
-            payload: ["hint_text": AnyCodable(text)]
-        )
-        try? await eventStore.append(event)
-    }
-
-    private func logSkipUsed(course: Course, idx: Int, panel: String, sessionId: String) async {
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: .skipUsed,
-            courseId: course.id,
-            lessonIdx: idx,
-            payload: ["from_panel": AnyCodable(panel)]
-        )
-        try? await eventStore.append(event)
-    }
-
-    private func logLessonComplete(course: Course, idx: Int, sessionId: String, finished: Bool) async {
-        guard idx < course.lessons.count else { return }
-        let event = LogEvent(
-            sessionId: sessionId,
-            timestamp: Date(),
-            type: .lessonComplete,
-            courseId: course.id,
-            lessonIdx: idx,
-            payload: [
-                "lesson_title": AnyCodable(course.lessons[idx].title),
-                "finished": AnyCodable(finished)
-            ]
-        )
-        try? await eventStore.append(event)
-    }
 }
