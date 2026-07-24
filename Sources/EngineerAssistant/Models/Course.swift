@@ -71,6 +71,8 @@ struct Lesson: Codable, Equatable, Identifiable {
     let demos: [Demo]
     let practicePrompt: String
     let challenge: Challenge
+    /// Two or three takeaway lines shown after the challenge — the fifth standard panel.
+    let recapMd: String?
 
     enum CodingKeys: String, CodingKey {
         case title
@@ -78,6 +80,7 @@ struct Lesson: Codable, Equatable, Identifiable {
         case demos
         case practicePrompt = "practice_prompt"
         case challenge
+        case recapMd = "recap_md"
     }
 }
 

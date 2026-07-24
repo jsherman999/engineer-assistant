@@ -75,6 +75,9 @@ struct CoursePlayerView: View {
                             section("Demos", Theme.demos) { demosList(lesson.demos) }
                             section("Practice", Theme.practice) { practiceText(lesson.practicePrompt) }
                             section("Challenge", Theme.challenge) { challengeBlock(lesson.challenge) }
+                            if let recap = lesson.recapMd, !recap.isEmpty {
+                                section("Recap", Theme.recap) { MarkdownContentView(text: recap) }
+                            }
                             if session.isLastLesson, let final = course.finalChallenge {
                                 section("Final Challenge", Theme.finalChallenge) { finalChallengeBlock(final) }
                             }
@@ -434,6 +437,7 @@ struct CoursePlayerView: View {
             }
             .disabled(session.currentLessonIdx >= course.lessons.count - 1)
             .tint(challengePassed ? .green : nil)
+            .accessibilityIdentifier("nextLesson")
             .opacity(nextPulse ? 0.5 : 1.0)
             // After a passing check, gently blink Next to draw attention (until you move on).
             .onChange(of: session.challengeOutcome?.passed) { _, passed in
@@ -448,6 +452,17 @@ struct CoursePlayerView: View {
             lessonBadge
 
             Spacer()
+
+            // Skip is deliberately quiet: available when stuck, but never the obvious button.
+            Button {
+                session.skipCurrentLesson()
+            } label: {
+                Label("Skip", systemImage: "forward.end")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Move on without passing this challenge — recorded for your instructor")
+            .disabled(session.currentLessonIdx >= course.lessons.count - 1)
 
             Button {
                 session.showLessonChat.toggle()

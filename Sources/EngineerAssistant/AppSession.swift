@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 
 @MainActor
 final class AppSession: ObservableObject {
@@ -44,6 +45,11 @@ final class AppSession: ObservableObject {
     /// Bumped whenever saved lesson results change, so result views re-render.
     @Published private(set) var resultsRevision: Int = 0
 
+    /// Session boundary: quit, or this long without student activity.
+    static let idleTimeout: TimeInterval = 30 * 60
+    private var lastActivity = Date()
+    private var idleTimer: Timer?
+
     private let claude = ClaudeClient()
     private let courseGenerator = CourseGenerator()
     private let courseStore: CourseStore = FileCourseStore()
@@ -78,9 +84,57 @@ final class AppSession: ObservableObject {
             let id = try await eventStore.startSession()
             self.sessionId = id
             startAskTerminal()
+            observeAppTermination()
+            startIdleTimer()
         } catch {
             self.lastError = "Failed to start session: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - Session boundary (quit or 30 minutes idle)
+
+    /// Closes the open session on quit so the instructor dashboard shows a real duration
+    /// instead of leaving every session reading "in progress" forever.
+    private func observeAppTermination() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.endSession(reason: "quit") }
+        }
+    }
+
+    /// Ends the session synchronously — `willTerminate` does not wait for detached work, so the
+    /// event has to be on disk before the process goes away.
+    private func endSession(reason: String) {
+        guard let sessionId else { return }
+        self.sessionId = nil
+        idleTimer?.invalidate()
+        idleTimer = nil
+        eventStore.endSessionSynchronously(sessionId, reason: reason)
+    }
+
+    /// A session ends after 30 minutes without student activity; the next interaction opens a
+    /// fresh one, so a Mac left running overnight doesn't produce one 14-hour "session".
+    private func startIdleTimer() {
+        idleTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkIdle() }
+        }
+        idleTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func checkIdle() {
+        guard sessionId != nil, Date().timeIntervalSince(lastActivity) >= Self.idleTimeout else { return }
+        endSession(reason: "idle")
+    }
+
+    /// Called from every student-initiated action. Reopens a session if the previous one timed
+    /// out, so activity after a long break is recorded rather than dropped.
+    func noteActivity() {
+        lastActivity = Date()
+        guard sessionId == nil else { return }
+        Task { _ = await ensureSession() }
     }
 
     /// A persistent, unrestricted macOS shell shown beside Ask-mode chat so the student can try
@@ -100,6 +154,7 @@ final class AppSession: ObservableObject {
                 fontSize: 10,
                 foregroundColor: Theme.terminalGreenNS
             )
+            controller.onActivity = { [weak self] in self?.noteActivity() }
             try controller.start()
             askTerminal = controller
         } catch {
@@ -119,7 +174,7 @@ final class AppSession: ObservableObject {
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending else { return }
-        guard let sessionId else { return }
+        noteActivity()
 
         let mode = currentMode
         let userMsg = ChatMessage(role: .user, mode: mode, text: trimmed)
@@ -128,6 +183,13 @@ final class AppSession: ObservableObject {
         lastError = nil
 
         Task {
+            // Resolve the session inside the task: after an idle timeout the previous one is
+            // closed, and this first message is what opens the next.
+            guard let sessionId = await ensureSession() else {
+                lastError = "Could not start a session to record this."
+                isSending = false
+                return
+            }
             await logChatEvent(.chatUser, mode: mode, text: trimmed, sessionId: sessionId, courseId: nil)
             if mode == .ask {
                 await handleAsk(sessionId: sessionId)
@@ -136,6 +198,15 @@ final class AppSession: ObservableObject {
             }
             isSending = false
         }
+    }
+
+    /// The current session id, opening a fresh session if the last one timed out.
+    private func ensureSession() async -> String? {
+        if let sessionId { return sessionId }
+        guard let id = try? await eventStore.startSession() else { return nil }
+        sessionId = id
+        startIdleTimer()
+        return id
     }
 
     private func handleAsk(sessionId: String) async {
@@ -222,6 +293,7 @@ final class AppSession: ObservableObject {
     }
 
     func openCourse(_ course: Course) {
+        noteActivity()
         activeCourse = course
         let resumeIdx = progressStore.progress(for: course.id)?.lessonIdx ?? 0
         currentLessonIdx = max(0, min(resumeIdx, course.lessons.count - 1))
@@ -296,6 +368,7 @@ final class AppSession: ObservableObject {
                 eventStore: eventStore,
                 runtime: runtime
             )
+            controller.onActivity = { [weak self] in self?.noteActivity() }
             try controller.start()
             terminal = controller
             seedStarterFiles()
@@ -420,6 +493,7 @@ final class AppSession: ObservableObject {
                                  title: String,
                                  setChecking: @escaping (Bool) -> Void,
                                  setOutcome: @escaping (VerifyOutcome?) -> Void) {
+        noteActivity()
         guard let course = activeCourse, let sessionId else { return }
         guard let terminal else {
             setOutcome(VerifyOutcome(passed: false, detail: "Start the sandbox shell first."))

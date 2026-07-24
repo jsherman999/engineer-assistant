@@ -179,22 +179,18 @@ private struct SessionDetailView: View {
     // MARK: - Terminal reconstruction
 
     private var terminal: some View {
-        ScrollView {
-            Text(reconstructedTerminal.isEmpty ? "No shell activity in this session." : reconstructedTerminal)
-                .font(.system(.caption, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-        }
-        .background(Color.black.opacity(0.9))
-        .foregroundStyle(Color(red: 0.85, green: 1.0, blue: 0.85))
+        TerminalReplayView(frames: replayFrames)
     }
 
-    private var reconstructedTerminal: String {
+    /// Only stdout/stderr are replayed. The PTY echoes what the student types, so including
+    /// `shell_stdin` would print every keystroke twice.
+    private var replayFrames: [ReplayFrame] {
         session.events
-            .filter { [.shellStdin, .shellStdout, .shellStderr].contains($0.type) }
-            .compactMap { $0.string("text") }
-            .joined()
+            .filter { $0.type == .shellStdout || $0.type == .shellStderr }
+            .compactMap { event in
+                guard let text = event.string("text"), !text.isEmpty else { return nil }
+                return ReplayFrame(timestamp: event.timestamp, text: text)
+            }
     }
 
     private func color(for type: EventType) -> Color {

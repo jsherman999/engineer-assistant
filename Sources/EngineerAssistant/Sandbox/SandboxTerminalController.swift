@@ -19,6 +19,9 @@ final class SandboxTerminalController: ObservableObject {
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var statusMessage: String? = nil
     @Published private(set) var lastExitCode: Int? = nil
+    /// Set when the student pressed Return on a command that can't be undone; the view shows
+    /// an explanation and the Return is held until they decide.
+    @Published var pendingDangerousCommand: DangerousCommand? = nil
 
     let workingDirectory: URL
     let courseId: String
@@ -27,6 +30,8 @@ final class SandboxTerminalController: ObservableObject {
     /// (Course mode), it runs under sandbox-exec with writes confined and network blocked.
     let confined: Bool
     let view: SandboxTerminalProcessView
+    /// Typing in the shell counts as student activity for the idle-session timer.
+    var onActivity: (() -> Void)?
 
     private let sessionId: String
     private let eventStore: EventStore
@@ -35,6 +40,8 @@ final class SandboxTerminalController: ObservableObject {
     private var profileURL: URL?
     /// Tail of the serialized chain of pending event-log writes (see `log`).
     private var logTail: Task<Void, Never>?
+    /// The command line being typed, reconstructed from keystrokes (see `trackLine`).
+    private var lineBuffer: String = ""
 
     private static let linuxImage = "docker.io/library/ubuntu:latest"
     /// PATH including Homebrew (Apple Silicon + Intel) so host-installed tools resolve.
@@ -147,23 +154,36 @@ final class SandboxTerminalController: ObservableObject {
 
     private func startLinux() throws {
         guard let runtime else { throw SandboxError.noContainerRuntime }
-        // bash runs PROMPT_COMMAND before each prompt: it emits the EAX exit-code marker
-        // ShellTeeParser consumes (reading $? FIRST so the code is the user command's), then
-        // sets a clean PS1 — `student<N>:<dir>#` — replacing the noisy `root@ea-<uuid>:~#`
-        // default and matching the student<N> workspace name used for macOS courses.
-        // (No preexec marker on Linux, so lastCommand stays nil.)
+        // Seed a .bashrc, then `exec bash -i` so the interactive shell reads it. This gets the
+        // same shell integration macOS has: PROMPT_COMMAND emits the EAX exit-code marker
+        // (reading $? FIRST so the code is the user command's), and a DEBUG trap emits the EAC
+        // command marker so `lastCommand` is populated on Linux too — without it every Linux
+        // challenge attempt was recorded with a blank command. PS1 is the clean
+        // `student<N>:<dir>$` used for macOS courses instead of `root@ea-<uuid>:~#`.
+        // The rc file travels as base64 so quoting survives the `bash -c` round-trip.
         let label = workingDirectory.lastPathComponent
-        let promptCommand = #"PROMPT_COMMAND=printf "\001EAX:%d\001" $?; PS1='\#(label):\w\$ '"#
+        let bashrc = """
+        PS1='\(label):\\w\\$ '
+        PROMPT_COMMAND='printf "\\001EAX:%d\\001" $?'
+        ea_debug() {
+          case "$BASH_COMMAND" in
+            *EAX*|ea_debug) return ;;
+          esac
+          printf '\\001EAC:%s\\001' "$BASH_COMMAND"
+        }
+        trap ea_debug DEBUG
+        """
+        let b64 = Data(bashrc.utf8).base64EncodedString()
+        let bootstrap = "printf '%s' '\(b64)' | base64 -d > /root/.bashrc; exec bash -i"
 
         view.startProcess(
             executable: runtime.path,
             args: [
                 "run", "--rm", "-it",
                 "--name", containerName,
-                "-e", promptCommand,
                 "-w", "/root",
                 Self.linuxImage,
-                "bash", "-i"
+                "bash", "-c", bootstrap
             ],
             environment: [
                 "HOME=\(NSHomeDirectory())",
@@ -214,8 +234,74 @@ final class SandboxTerminalController: ObservableObject {
 
     // MARK: - Tee callbacks (invoked on the main queue by SandboxTerminalProcessView)
 
-    func ingestInput(_ data: ArraySlice<UInt8>) {
+    /// Logs the student's keystrokes and decides whether they reach the shell. Returns false to
+    /// swallow the Return that would run a destructive command, holding it until the student
+    /// confirms in `pendingDangerousCommand`.
+    func ingestInput(_ data: ArraySlice<UInt8>) -> Bool {
+        onActivity?()
         log(.shellStdin, data: Data(data))
+        return trackLine(data)
+    }
+
+    /// Rebuilds the current command line from keystrokes so it can be checked before Return
+    /// reaches the shell. Deliberately simple: it understands typing, backspace, and Ctrl-C/U,
+    /// which is enough for the line shapes the guard cares about. Anything it mis-tracks fails
+    /// open (the command runs) rather than blocking a legitimate command.
+    private func trackLine(_ data: ArraySlice<UInt8>) -> Bool {
+        for byte in data {
+            switch byte {
+            case 0x0d, 0x0a: // Return
+                let line = lineBuffer
+                lineBuffer = ""
+                if pendingDangerousCommand == nil, let danger = DestructiveCommandGuard.evaluate(line) {
+                    pendingDangerousCommand = danger
+                    return false
+                }
+            case 0x7f, 0x08: // Backspace / Delete
+                if !lineBuffer.isEmpty { lineBuffer.removeLast() }
+            case 0x03, 0x15: // Ctrl-C, Ctrl-U
+                lineBuffer = ""
+            case 0x20...0x7e: // Printable ASCII
+                lineBuffer.append(Character(UnicodeScalar(byte)))
+            default:
+                break // Arrow keys, escapes, UTF-8 continuation bytes: ignored.
+            }
+        }
+        return true
+    }
+
+    /// Student chose to run it anyway — send the Return that was held back.
+    func confirmPendingCommand() {
+        guard let pending = pendingDangerousCommand else { return }
+        pendingDangerousCommand = nil
+        logGuardDecision(pending, ranAnyway: true)
+        view.send(txt: "\r")
+    }
+
+    /// Student backed out — clear the line in the shell so the command can't run by accident.
+    func cancelPendingCommand() {
+        guard let pending = pendingDangerousCommand else { return }
+        pendingDangerousCommand = nil
+        logGuardDecision(pending, ranAnyway: false)
+        lineBuffer = ""
+        view.send(txt: "\u{15}") // Ctrl-U clears the line
+    }
+
+    private func logGuardDecision(_ command: DangerousCommand, ranAnyway: Bool) {
+        let event = LogEvent(
+            sessionId: sessionId,
+            timestamp: Date(),
+            type: .destructiveBlocked,
+            courseId: courseId,
+            lessonIdx: nil,
+            payload: [
+                "command": AnyCodable(command.command),
+                "headline": AnyCodable(command.headline),
+                "ran_anyway": AnyCodable(ranAnyway)
+            ]
+        )
+        let store = self.eventStore
+        Task { try? await store.append(event) }
     }
 
     /// Parses PTY output, records exit code / stdout, logs the clean text, and returns

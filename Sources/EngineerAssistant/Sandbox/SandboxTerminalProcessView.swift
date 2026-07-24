@@ -8,7 +8,10 @@ final class SandboxTerminalProcessView: LocalProcessTerminalView {
     weak var coordinator: SandboxTerminalController?
 
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        MainActor.assumeIsolated { coordinator?.ingestInput(data) }
+        // The coordinator can hold back the Return that would run a destructive command until
+        // the student confirms; everything else is forwarded untouched.
+        let forward = MainActor.assumeIsolated { coordinator?.ingestInput(data) } ?? true
+        guard forward else { return }
         super.send(source: source, data: data)
     }
 

@@ -207,6 +207,7 @@ final class ClaudeClient {
     - demos: 2 to 4 real commands the student should READ before trying. expected_output should be realistic and short.
     - practice_prompt: one short paragraph inviting the student to experiment in the shell.
     - challenge: one specific task with a deterministic verify check.
+    - recap_md: 2-3 markdown bullets naming what the student can now do, phrased as skills rather than a summary of the text.
 
     Whenever a challenge assumes the student already has something to work with — a file to edit, a script to fix, data to count — you MUST supply it in `starter_files`, because the sandbox starts empty. `starter_state` is only the prose description shown to the student; it creates nothing. Prefer challenges that start from a seeded file: repairing a broken script or investigating real data teaches more than creating a file from scratch.
 
@@ -273,9 +274,10 @@ final class ClaudeClient {
                     ]
                 ],
                 "practice_prompt": ["type": "string"],
-                "challenge": challengeSchema
+                "challenge": challengeSchema,
+                "recap_md": ["type": "string", "description": "2-3 markdown bullets naming what the student should now be able to do."]
             ],
-            "required": ["title", "concept_md", "demos", "practice_prompt", "challenge"]
+            "required": ["title", "concept_md", "demos", "practice_prompt", "challenge", "recap_md"]
         ]
         return [
             "type": "object",

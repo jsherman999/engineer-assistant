@@ -19,7 +19,7 @@ final class CourseFlowIntegrationTests: XCTestCase {
         let verify = VerifyCheck(type: .fileExists, value: nil, path: "hello.txt", exitCode: nil)
         let lessons = (0..<3).map { i in
             Lesson(title: "Lesson \(i)", conceptMd: "c", demos: [], practicePrompt: "p",
-                   challenge: Challenge(task: "t", starterState: nil, starterFiles: nil, verify: verify))
+                   challenge: Challenge(task: "t", starterState: nil, starterFiles: nil, verify: verify), recapMd: "- recap")
         }
         let draft = CourseDraft(title: "Flow Course", description: "d", estimatedMinutes: 10,
                                 environment: .macos, prerequisites: [], lessons: lessons, finalChallenge: nil)

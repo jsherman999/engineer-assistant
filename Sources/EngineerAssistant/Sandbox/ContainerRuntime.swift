@@ -66,7 +66,8 @@ struct ContainerRuntime: Equatable {
     func ensureServiceRunning(pollSeconds: Int = 30) async -> (ready: Bool, message: String) {
         if await isServiceRunning() { return (true, "") }
         let start = startInvocation
-        _ = await ProcessRunner.run(start.path, start.args)
+        // Booting a VM legitimately exceeds the default helper timeout.
+        _ = await ProcessRunner.run(start.path, start.args, timeout: 120)
         for _ in 0..<pollSeconds {
             if await isServiceRunning() { return (true, "") }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
