@@ -161,8 +161,6 @@ private struct AssistantContent: View {
     let text: String
 
     private static let proseFont = Font.system(.callout, design: .rounded)
-    private static let promptColor = Color(red: 0.36, green: 0.92, blue: 0.45)
-    private static let codeText = Color(red: 0.88, green: 0.91, blue: 0.88)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -207,17 +205,17 @@ private struct AssistantContent: View {
                 HStack(alignment: .top, spacing: 6) {
                     Text("❯")
                         .font(.system(.callout, design: .monospaced))
-                        .foregroundStyle(Self.promptColor)
+                        .foregroundStyle(Theme.codePrompt)
                     Text(line)
                         .font(.system(.callout, design: .monospaced))
-                        .foregroundStyle(Self.codeText)
+                        .foregroundStyle(Theme.codeForeground)
                         .textSelection(.enabled)
                 }
             }
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black.opacity(0.85))
+        .background(Theme.codeBackground)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

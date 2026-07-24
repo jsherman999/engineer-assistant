@@ -217,7 +217,8 @@ final class ClaudeClient {
 
     For each lesson include:
     - concept_md: 100-200 word markdown explanation, with one or two short inline code examples.
-    - demos: 2 to 4 real commands the student should READ before trying. expected_output should be realistic and short.
+    - demos: 2 to 4 real commands the student should READ before trying. expected_output should be realistic and short. Break every command down in `parts`: one entry per flag, path, or argument, using the exact token as it appears in the command. A student should be able to take `tar -xzf archive.tar.gz` apart rather than memorising it.
+    - visual: OPTIONAL diagram. Include one when the idea is structural and a picture beats a paragraph — a directory layout (`tree`), data changing shape through a pipeline (`pipeline`), permission bits (`permissions`), or an ordered process like a DNS lookup (`flow`). Omit it when prose is genuinely clearer; a diagram that just restates the text is noise.
     - practice_prompt: one short paragraph inviting the student to experiment in the shell.
     - challenge: one specific task with a deterministic verify check.
     - recap_md: 2-3 markdown bullets naming what the student can now do, phrased as skills rather than a summary of the text.
@@ -269,11 +270,41 @@ final class ClaudeClient {
             ],
             "required": ["task", "verify"]
         ]
+        let visualSchema: [String: Any] = [
+            "type": "object",
+            "description": "An optional diagram rendered beside the concept. Use one when the idea is structural — a directory layout, data flowing through a pipeline, permission bits, an ordered process — and omit it when prose is clearer.",
+            "properties": [
+                "type": ["type": "string", "enum": ["tree", "pipeline", "permissions", "flow"]],
+                "caption": ["type": "string", "description": "One line explaining what the diagram shows."],
+                "items": [
+                    "type": "array",
+                    "items": ["type": "string"],
+                    "description": "For `tree`: paths like `project/src/main.c`, directories ending in `/`. For `flow`: ordered step labels."
+                ],
+                "stages": [
+                    "type": "array",
+                    "description": "For `pipeline`: one entry per stage of a command like `cat f | grep x | wc -l`.",
+                    "items": [
+                        "type": "object",
+                        "properties": [
+                            "command": ["type": "string", "description": "Just this stage, e.g. `grep x`."],
+                            "output": ["type": "string", "description": "What this stage emits, so the student sees the data change shape."],
+                            "note": ["type": "string"]
+                        ],
+                        "required": ["command"]
+                    ]
+                ],
+                "mode": ["type": "string", "description": "For `permissions`: a mode like `rwxr-xr--` or `754`."],
+                "path": ["type": "string", "description": "For `permissions`: the file the mode belongs to."]
+            ],
+            "required": ["type"]
+        ]
         let lessonSchema: [String: Any] = [
             "type": "object",
             "properties": [
                 "title": ["type": "string"],
                 "concept_md": ["type": "string"],
+                "visual": visualSchema,
                 "demos": [
                     "type": "array",
                     "items": [
@@ -281,9 +312,21 @@ final class ClaudeClient {
                         "properties": [
                             "command": ["type": "string"],
                             "expected_output": ["type": "string"],
-                            "explanation": ["type": "string"]
+                            "explanation": ["type": "string"],
+                            "parts": [
+                                "type": "array",
+                                "description": "Token-by-token breakdown of `command`, so the student can take it apart in place.",
+                                "items": [
+                                    "type": "object",
+                                    "properties": [
+                                        "token": ["type": "string", "description": "An exact whitespace-separated token from the command, e.g. `-l` or `~/notes`."],
+                                        "meaning": ["type": "string", "description": "What that token does, in one short sentence."]
+                                    ],
+                                    "required": ["token", "meaning"]
+                                ]
+                            ]
                         ],
-                        "required": ["command", "expected_output", "explanation"]
+                        "required": ["command", "expected_output", "explanation", "parts"]
                     ]
                 ],
                 "practice_prompt": ["type": "string"],

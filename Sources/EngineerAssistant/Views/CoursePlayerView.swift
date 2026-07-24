@@ -1,37 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// A demo command on the dark terminal block, with a copy button that puts the bare command
-/// (no `$ ` prompt) on the clipboard so it can be pasted straight into the terminal.
-private struct DemoCommandRow: View {
-    let command: String
-    @State private var copied = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("$ \(command)")
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.green)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(command, forType: .string)
-                copied = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
-            } label: {
-                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .foregroundStyle(copied ? .green : Color(white: 0.85))
-            }
-            .buttonStyle(.borderless)
-            .help("Copy command")
-        }
-        .padding(8)
-        .background(Color.black.opacity(0.85))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-}
-
 struct CoursePlayerView: View {
     @EnvironmentObject var session: AppSession
     let course: Course
@@ -50,6 +19,14 @@ struct CoursePlayerView: View {
             Divider()
             // IDE split: course narrative (left) | live terminal (right) | optional Ask sidebar.
             HStack(spacing: 0) {
+                LessonRailView(
+                    course: course,
+                    currentIdx: session.currentLessonIdx,
+                    results: session.results(for: course.id),
+                    onSelect: { session.goToLesson($0) }
+                )
+                .id(session.resultsRevision) // redraw stop markers after a check
+                Divider()
                 leftPanel
                 Divider()
                 rightPanel
@@ -71,7 +48,14 @@ struct CoursePlayerView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
                             lessonTitle(lesson).id("lessonTop")
-                            section("Concept", Theme.concept) { conceptText(lesson.conceptMd) }
+                            section("Concept", Theme.concept) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    conceptText(lesson.conceptMd)
+                                    if let visual = lesson.visual {
+                                        LessonVisualView(visual: visual)
+                                    }
+                                }
+                            }
                             section("Demos", Theme.demos) { demosList(lesson.demos) }
                             section("Practice", Theme.practice) { practiceText(lesson.practicePrompt) }
                             section("Challenge", Theme.challenge) { challengeBlock(lesson.challenge) }
@@ -107,7 +91,17 @@ struct CoursePlayerView: View {
     private var rightPanel: some View {
         Group {
             if let terminal = session.terminal {
-                SandboxTerminalView(controller: terminal)
+                // Terminal above, live sandbox contents below: running `mkdir`/`touch`/`rm` and
+                // watching the tree change is what makes paths concrete.
+                VSplitView {
+                    SandboxTerminalView(controller: terminal)
+                        .frame(minHeight: 200)
+                    SandboxTreeView(
+                        fileSystem: terminal.fileSystem,
+                        refreshToken: terminal.completedCommands
+                    )
+                    .frame(minHeight: 90, idealHeight: 170)
+                }
             } else if session.containerStarting {
                 VStack(alignment: .leading, spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -228,7 +222,7 @@ struct CoursePlayerView: View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(demos.enumerated()), id: \.offset) { _, demo in
                 VStack(alignment: .leading, spacing: 4) {
-                    DemoCommandRow(command: demo.command)
+                    CommandAnatomyView(command: demo.command, parts: demo.parts)
                     if !demo.expectedOutput.isEmpty {
                         Text(demo.expectedOutput)
                             .font(.system(.callout, design: .monospaced))
@@ -407,14 +401,6 @@ struct CoursePlayerView: View {
         }
     }
 
-    private var lessonBadge: some View {
-        Text("Lesson \(session.currentLessonIdx + 1) of \(course.lessons.count)")
-            .font(.headline)
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14).padding(.vertical, 6)
-            .background(Capsule().fill(Theme.headerTint.gradient))
-    }
-
     private var controls: some View {
         HStack(spacing: 10) {
             Button {
@@ -448,8 +434,6 @@ struct CoursePlayerView: View {
                     withAnimation(.easeOut(duration: 0.2)) { nextPulse = false }
                 }
             }
-
-            lessonBadge
 
             Spacer()
 

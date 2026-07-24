@@ -18,6 +18,13 @@ enum Theme {
     static let recap = Color(red: 0.36, green: 0.62, blue: 0.66) // teal
     static let headerTint = Color(red: 0.30, green: 0.56, blue: 0.92)
 
+    // Code / command blocks. Deliberately dark in both appearances: a command block should read
+    // as "this is a terminal", and the foreground is defined here so callers stop hardcoding it.
+    static let codeBackground = Color(red: 0.09, green: 0.10, blue: 0.13)
+    static let codeForeground = Color(red: 0.88, green: 0.91, blue: 0.88)
+    static let codePrompt = Color(red: 0.36, green: 0.92, blue: 0.45)
+    static let codeControl = Color(white: 0.72)
+
     // Terminal pane
     static let terminalBarBg = Color(red: 0.12, green: 0.13, blue: 0.16)
     static let terminalBarFg = Color(red: 0.82, green: 0.85, blue: 0.90)

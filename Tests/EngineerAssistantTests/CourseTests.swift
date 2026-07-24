@@ -59,10 +59,14 @@ final class CourseTests: XCTestCase {
                 Lesson(
                     title: "L1",
                     conceptMd: "concept",
-                    demos: [Demo(command: "ls", expectedOutput: "...", explanation: "lists files")],
+                    demos: [Demo(command: "ls -l", expectedOutput: "...", explanation: "lists files",
+                                 parts: [CommandPart(token: "-l", meaning: "long format")])],
                     practicePrompt: "explore",
                     challenge: Challenge(task: "do it", starterState: nil, starterFiles: nil, verify: VerifyCheck(type: .exitCode, value: nil, path: nil, exitCode: 0)),
-                    recapMd: "- you can now run ls"
+                    recapMd: "- you can now run ls",
+                    visual: LessonVisual(type: "tree", caption: "Your files",
+                                         items: ["notes/", "notes/todo.txt"],
+                                         stages: nil, mode: nil, path: nil)
                 )
             ],
             finalChallenge: nil

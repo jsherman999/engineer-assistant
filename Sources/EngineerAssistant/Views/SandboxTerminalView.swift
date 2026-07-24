@@ -31,6 +31,22 @@ struct SandboxTerminalView: View {
                 .lineLimit(1).truncationMode(.tail)
             Spacer()
             Button {
+                controller.adjustFontSize(by: -1)
+            } label: {
+                Image(systemName: "textformat.size.smaller").font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .tint(Theme.terminalBarFg)
+            .help("Smaller text")
+            Button {
+                controller.adjustFontSize(by: 1)
+            } label: {
+                Image(systemName: "textformat.size.larger").font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .tint(Theme.terminalBarFg)
+            .help("Larger text")
+            Button {
                 controller.reset()
             } label: {
                 Label("Reset Sandbox", systemImage: "arrow.counterclockwise")

@@ -22,6 +22,11 @@ final class SandboxTerminalController: ObservableObject {
     /// Set when the student pressed Return on a command that can't be undone; the view shows
     /// an explanation and the Return is held until they decide.
     @Published var pendingDangerousCommand: DangerousCommand? = nil
+    /// Increments as each command completes, so views that mirror sandbox state (the file tree)
+    /// can refresh right away instead of waiting out a poll interval.
+    @Published private(set) var completedCommands: Int = 0
+    /// Terminal font size, adjustable by the student — the default is small on a big display.
+    @Published private(set) var fontSize: CGFloat
 
     let workingDirectory: URL
     let courseId: String
@@ -86,6 +91,7 @@ final class SandboxTerminalController: ObservableObject {
         self.runtime = runtime
         try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
         self.workingDirectory = workingDirectory
+        self.fontSize = fontSize
         self.view = SandboxTerminalProcessView(frame: CGRect(x: 0, y: 0, width: 640, height: 280))
         self.view.coordinator = self
         // Small monospaced font on a dark IDE-style palette.
@@ -194,6 +200,15 @@ final class SandboxTerminalController: ObservableObject {
             currentDirectory: nil
         )
         statusMessage = "\(runtime.displayName): launching Linux container (\(Self.linuxImage))… first run pulls the image. If it fails, run `\(runtime.engine.readinessHint)`."
+    }
+
+    /// Zoom the terminal. The default is deliberately small to fit a lot of output, which is
+    /// hard to read across a room or on a scaled display.
+    func adjustFontSize(by delta: CGFloat) {
+        let next = min(max(fontSize + delta, 8), 24)
+        guard next != fontSize else { return }
+        fontSize = next
+        view.font = NSFont.monospacedSystemFont(ofSize: next, weight: .regular)
     }
 
     func stop() {
@@ -323,6 +338,7 @@ final class SandboxTerminalController: ObservableObject {
             case .finished(let code, let output):
                 lastExitCode = code
                 lastStdout = output
+                completedCommands += 1
             }
         }
         return parsed.display

@@ -56,6 +56,37 @@ final class VerifierTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: "/Users/student/notes.txt"))
     }
 
+    /// Feeds the live sandbox tree beside the terminal.
+    func testListTreeReportsFilesAndDirectoriesButNotDotfiles() async {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let fs = HostSandboxFileSystem(root: dir)
+
+        await fs.writeFile("notes/todo.txt", content: "x", executable: false)
+        await fs.writeFile("run.sh", content: "#!/bin/sh", executable: true)
+        // Shell integration writes these into the sandbox; they are ours, not the student's.
+        await fs.writeFile(".zshrc", content: "PROMPT=x", executable: false)
+
+        let tree = await fs.listTree(maxDepth: 3, limit: 100)
+        XCTAssertTrue(tree.contains("notes/"), "directories are marked with a trailing slash")
+        XCTAssertTrue(tree.contains("notes/todo.txt"))
+        XCTAssertTrue(tree.contains("run.sh"))
+        XCTAssertFalse(tree.contains(where: { $0.hasPrefix(".") }), "dotfiles are hidden")
+    }
+
+    func testListTreeRespectsDepthAndLimit() async {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let fs = HostSandboxFileSystem(root: dir)
+        await fs.writeFile("a/b/c/deep.txt", content: "x", executable: false)
+
+        let shallow = await fs.listTree(maxDepth: 2, limit: 100)
+        XCTAssertTrue(shallow.contains("a/"))
+        XCTAssertFalse(shallow.contains("a/b/c/deep.txt"), "depth is capped")
+
+        for i in 0..<10 { await fs.writeFile("f\(i).txt", content: "x", executable: false) }
+        let capped = await fs.listTree(maxDepth: 3, limit: 4)
+        XCTAssertEqual(capped.count, 4, "limit bounds the walk")
+    }
+
     func testExitCodeMatch() async {
         let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let check = VerifyCheck(type: .exitCode, value: nil, path: nil, exitCode: 0)

@@ -8,6 +8,10 @@ protocol SandboxFileSystem: Sendable {
     /// Seeds a challenge's `starter_files` before the student begins. Parent directories are
     /// created; `executable` marks scripts runnable.
     func writeFile(_ path: String, content: String, executable: Bool) async
+    /// Home-relative paths in the sandbox, for the live tree beside the terminal. Directories
+    /// end in `/`. Dotfiles are omitted — the shell integration writes `.zshrc`/`.sandbox.sb`
+    /// into the sandbox and those are ours, not the student's.
+    func listTree(maxDepth: Int, limit: Int) async -> [String]
 }
 
 /// macOS sandbox: paths resolve against the per-course working directory (the shell's HOME).
@@ -48,6 +52,40 @@ struct HostSandboxFileSystem: SandboxFileSystem {
             return try? String(contentsOf: alt, encoding: .utf8)
         }
         return nil
+    }
+
+    func listTree(maxDepth: Int, limit: Int) async -> [String] {
+        // FileManager's enumerator can't be iterated from an async context, so the walk happens
+        // in a synchronous helper.
+        walk(maxDepth: maxDepth, limit: limit)
+    }
+
+    private func walk(maxDepth: Int, limit: Int) -> [String] {
+        let keys: [URLResourceKey] = [.isDirectoryKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+
+        var out: [String] = []
+        let rootPath = root.standardizedFileURL.path
+        for case let url as URL in enumerator {
+            if out.count >= limit { break }
+            let path = url.standardizedFileURL.path
+            guard path.hasPrefix(rootPath) else { continue }
+            var relative = String(path.dropFirst(rootPath.count))
+            if relative.hasPrefix("/") { relative.removeFirst() }
+            guard !relative.isEmpty else { continue }
+            let depth = relative.split(separator: "/").count
+            if depth > maxDepth {
+                enumerator.skipDescendants()
+                continue
+            }
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            out.append(isDirectory ? relative + "/" : relative)
+        }
+        return out.sorted()
     }
 
     func writeFile(_ path: String, content: String, executable: Bool) async {
@@ -99,6 +137,30 @@ struct ContainerFileSystem: SandboxFileSystem {
             if exit == 0 { return output }
         }
         return nil
+    }
+
+    func listTree(maxDepth: Int, limit: Int) async -> [String] {
+        // Two POSIX `find` passes rather than GNU `-printf`, which BusyBox images lack:
+        // directories are listed first and given a trailing slash, files listed as-is.
+        // `-not -path '*/.*'` drops dotfiles the same way the macOS side does.
+        let common = "-mindepth 1 -maxdepth \(maxDepth) -not -path '*/.*'"
+        let script = """
+        cd /root || exit 1
+        find . \(common) -type d | sed 's|$|/|'
+        find . \(common) ! -type d
+        """
+        let (exit, output) = await ProcessRunner.run(enginePath, ["exec", containerName, "sh", "-c", script])
+        guard exit == 0 else { return [] }
+
+        return output.split(separator: "\n").compactMap { raw -> String? in
+            var line = String(raw)
+            guard line.hasPrefix("./") else { return nil }
+            line.removeFirst(2)
+            return line.isEmpty ? nil : line
+        }
+        .sorted()
+        .prefix(limit)
+        .map { $0 }
     }
 
     func writeFile(_ path: String, content: String, executable: Bool) async {

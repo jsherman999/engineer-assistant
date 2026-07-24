@@ -27,16 +27,49 @@ struct VerifyCheck: Codable, Equatable {
     }
 }
 
+/// One annotated piece of a command — `-r`, `--color`, a path — with what it means. Renders as
+/// clickable tokens under the command so a student can take `tar -xzf` apart without leaving
+/// the lesson, instead of memorising it as a magic incantation.
+struct CommandPart: Codable, Equatable {
+    let token: String
+    let meaning: String
+}
+
 struct Demo: Codable, Equatable {
     let command: String
     let expectedOutput: String
     let explanation: String
+    /// Per-token breakdown of `command`. Optional: older cached courses have none.
+    let parts: [CommandPart]?
 
     enum CodingKeys: String, CodingKey {
         case command
         case expectedOutput = "expected_output"
         case explanation
+        case parts
     }
+}
+
+/// A diagram a lesson can ask for instead of explaining a structural idea in prose. The player
+/// owns the renderers; the course only picks a `type` and supplies its data. Adding a new kind
+/// of diagram means adding one renderer here, not changing every lesson.
+struct LessonVisual: Codable, Equatable {
+    /// "tree" | "pipeline" | "permissions" | "flow"
+    let type: String
+    let caption: String?
+    /// `tree`: paths like `notes/todo.txt`. `flow`: ordered step labels.
+    let items: [String]?
+    /// `pipeline`: each stage of a `a | b | c` command, with what it emits.
+    let stages: [PipelineStage]?
+    /// `permissions`: a mode like `rwxr-xr--` and the file it belongs to.
+    let mode: String?
+    let path: String?
+}
+
+struct PipelineStage: Codable, Equatable {
+    let command: String
+    let output: String?
+    let note: String?
 }
 
 /// A file the sandbox must already contain before the student starts a challenge, so tasks
@@ -73,6 +106,8 @@ struct Lesson: Codable, Equatable, Identifiable {
     let challenge: Challenge
     /// Two or three takeaway lines shown after the challenge — the fifth standard panel.
     let recapMd: String?
+    /// Optional diagram rendered next to the concept.
+    let visual: LessonVisual?
 
     enum CodingKeys: String, CodingKey {
         case title
@@ -81,6 +116,7 @@ struct Lesson: Codable, Equatable, Identifiable {
         case practicePrompt = "practice_prompt"
         case challenge
         case recapMd = "recap_md"
+        case visual
     }
 }
 
