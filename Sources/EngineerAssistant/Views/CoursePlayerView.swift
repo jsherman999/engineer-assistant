@@ -94,8 +94,15 @@ struct CoursePlayerView: View {
                 // Terminal above, live sandbox contents below: running `mkdir`/`touch`/`rm` and
                 // watching the tree change is what makes paths concrete.
                 VSplitView {
-                    SandboxTerminalView(controller: terminal)
-                        .frame(minHeight: 200)
+                    VStack(spacing: 0) {
+                        SandboxTerminalView(controller: terminal)
+                        // A failed command is the most teachable moment there is, and it happens
+                        // while attention is already on the problem.
+                        if session.lastCommandFailed {
+                            errorHelpBar
+                        }
+                    }
+                    .frame(minHeight: 200)
                     SandboxTreeView(
                         fileSystem: terminal.fileSystem,
                         refreshToken: terminal.completedCommands
@@ -144,6 +151,47 @@ struct CoursePlayerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .frame(minWidth: 360)
+    }
+
+    /// Offers an explanation of the command that just failed, without making the student leave
+    /// the terminal to go and ask about it.
+    private var errorHelpBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .foregroundStyle(.orange).font(.caption)
+                Text("That command failed (exit \(session.terminal?.lastExitCode ?? -1)).")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if session.errorHelpText == nil {
+                    Button {
+                        session.explainLastError()
+                    } label: {
+                        if session.errorHelpLoading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Explain this error", systemImage: "questionmark.circle")
+                                .font(.caption)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(session.errorHelpLoading)
+                } else {
+                    Button("Dismiss") { session.errorHelpText = nil }
+                        .buttonStyle(.borderless).font(.caption)
+                }
+            }
+            if let help = session.errorHelpText {
+                Text(help)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(Color.orange.opacity(0.10))
+        .overlay(alignment: .top) { Rectangle().fill(Color.orange.opacity(0.35)).frame(height: 1) }
     }
 
     private var header: some View {
@@ -224,12 +272,7 @@ struct CoursePlayerView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     CommandAnatomyView(command: demo.command, parts: demo.parts)
                     if !demo.expectedOutput.isEmpty {
-                        Text(demo.expectedOutput)
-                            .font(.system(.callout, design: .monospaced))
-                            .padding(8)
-                            .background(Color.secondary.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                            .textSelection(.enabled)
+                        PredictedOutputView(expected: demo.expectedOutput)
                     }
                     Text(demo.explanation).font(.callout).foregroundStyle(.secondary)
                 }
@@ -364,6 +407,10 @@ struct CoursePlayerView: View {
                             .font(.caption).buttonStyle(.borderless)
                     }
                 }
+            }
+
+            if session.challengeOutcome?.passed == true {
+                ExplainBackView()
             }
 
             savedResult

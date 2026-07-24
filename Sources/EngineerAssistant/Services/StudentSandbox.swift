@@ -31,8 +31,26 @@ struct StudentSandbox {
         try? data.write(to: mapFile, options: .atomic)
     }
 
-    /// Allocates and creates a brand-new student directory for this open of the course.
+    /// The course's workspace, reusing the one it already has.
+    ///
+    /// This used to allocate a fresh `student<N>` on every open, which quietly made multi-session
+    /// work impossible: quit and reopen a course and your files were gone. A course now keeps
+    /// one workspace so a project can be built across sittings; `allocateFresh` is how a retake
+    /// gets a clean slate.
     func directory(forCourseId courseId: String) -> URL {
+        let state = load()
+        if let existing = state.byCourse[courseId]?.last {
+            let dir = rootDir.appendingPathComponent("student\(existing)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir
+        }
+        return allocateFresh(forCourseId: courseId)
+    }
+
+    /// Allocates a brand-new workspace for the course, leaving prior ones on disk until the
+    /// course is purged. The counter only ever climbs, so paths stay unique.
+    @discardableResult
+    func allocateFresh(forCourseId courseId: String) -> URL {
         var state = load()
         state.counter += 1
         let n = state.counter

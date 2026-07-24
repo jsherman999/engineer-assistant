@@ -429,6 +429,68 @@ final class ClaudeClient {
         )
     }
 
+    /// Responds to the student's own explanation of why their solution worked.
+    ///
+    /// Passing a challenge proves the command ran; it doesn't prove the student knows why. Saying
+    /// it back in their own words is what turns a passed check into understanding, so this
+    /// confirms what they got right and names precisely what they missed.
+    func reviewExplanation(task: String,
+                           concept: String,
+                           studentAnswer: String,
+                           model: String = defaultModel) async throws -> String {
+        let system = """
+        A high-school student just passed a shell challenge and is explaining, in their own words, \
+        why their solution worked. Reply in 2-3 sentences, speaking directly to them. Start by \
+        confirming the part they got right — be specific about what, not just "good job". Then, if \
+        something is missing or wrong, name that one thing plainly and correct it. If their \
+        explanation is sound, say so and add one detail that deepens it. Never be sarcastic or \
+        discouraging, and never pad with praise they didn't earn.
+        """
+        return try await complete(
+            system: system,
+            user: """
+            Challenge: \(task)
+            Concept taught: \(concept)
+
+            The student's explanation:
+            \(studentAnswer)
+            """,
+            maxTokens: 2048,
+            effort: .low,
+            model: model
+        )
+    }
+
+    /// Explains a shell error the student just hit, in the context of what they were doing.
+    ///
+    /// A failed command is the most teachable moment there is, and it happens while attention is
+    /// already on the problem — so this reads the error rather than making them go ask about it.
+    func explainError(command: String,
+                      output: String,
+                      exitCode: Int?,
+                      lessonContext: String?,
+                      model: String = defaultModel) async throws -> String {
+        let system = """
+        A high-school student's shell command just failed. In 2-4 sentences: say what the error \
+        actually means in plain language, why it happened here, and what to try next. Point at the \
+        fix rather than handing over a finished command — they are mid-challenge and should make \
+        the correction themselves. If the error is a common one, name it so they recognise it next \
+        time.
+        """
+        return try await complete(
+            system: system,
+            user: """
+            \(lessonContext.map { "They are working on: \($0)\n\n" } ?? "")Command: \(command)
+            Exit code: \(exitCode.map(String.init) ?? "unknown")
+            Output:
+            \(output.isEmpty ? "(no output)" : output)
+            """,
+            maxTokens: 2048,
+            effort: .low,
+            model: model
+        )
+    }
+
     /// One system + user turn in, trimmed text out — the shape every non-agentic helper needs.
     private func complete(system: String,
                           user: String,

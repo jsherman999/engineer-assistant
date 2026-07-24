@@ -5,6 +5,13 @@ struct RootView: View {
     @State private var showingSettings = false
     @State private var showingLibrary = false
     @State private var showingInstructor = false
+    @State private var showingReview = false
+
+    /// Reading resultsRevision keeps the badge current after a challenge check.
+    private var dueCount: Int {
+        _ = session.resultsRevision
+        return session.dueReviewItems().count
+    }
 
     private var generatingSubject: String? {
         if session.isRegenerating { return session.activeCourse?.subject }
@@ -37,6 +44,17 @@ struct RootView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    showingReview = true
+                } label: {
+                    // Badge the count so review is something the student notices, not something
+                    // they have to remember to go looking for.
+                    Label("Review\(dueCount > 0 ? " (\(dueCount))" : "")", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                }
+                .help("Lessons worth revisiting")
+                .disabled(session.courses.isEmpty)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     showingSettings = true
                 } label: {
                     Label("Settings", systemImage: "gearshape")
@@ -53,6 +71,10 @@ struct RootView: View {
         }
         .sheet(isPresented: $showingInstructor) {
             InstructorGateView()
+                .environmentObject(session)
+        }
+        .sheet(isPresented: $showingReview) {
+            ReviewView()
                 .environmentObject(session)
         }
         .background(

@@ -42,6 +42,12 @@ final class AppSession: ObservableObject {
     @Published var showLessonChat: Bool = false
     @Published var lessonChat: [ChatMessage] = []
     @Published var lessonChatSending: Bool = false
+    /// Explain-back: the student's own account of why their solution worked, and the response.
+    @Published var explanationSending: Bool = false
+    @Published var explanationFeedback: String? = nil
+    /// Inline help for a command that just failed.
+    @Published var errorHelpLoading: Bool = false
+    @Published var errorHelpText: String? = nil
     /// Bumped whenever saved lesson results change, so result views re-render.
     @Published private(set) var resultsRevision: Int = 0
 
@@ -128,6 +134,86 @@ final class AppSession: ObservableObject {
     private func checkIdle() {
         guard sessionId != nil, Date().timeIntervalSince(lastActivity) >= Self.idleTimeout else { return }
         endSession(reason: "idle")
+    }
+
+    // MARK: - Explain-back
+
+    /// After a pass, the student says in their own words why it worked and Claude responds.
+    /// Passing proves the command ran; explaining is what turns that into understanding.
+    func submitExplanation(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !explanationSending,
+              let course = activeCourse, currentLessonIdx < course.lessons.count else { return }
+        noteActivity()
+        let lesson = course.lessons[currentLessonIdx]
+        explanationSending = true
+        explanationFeedback = nil
+
+        Task {
+            do {
+                explanationFeedback = try await claude.reviewExplanation(
+                    task: lesson.challenge.task,
+                    concept: lesson.conceptMd,
+                    studentAnswer: trimmed
+                )
+            } catch {
+                explanationFeedback = "Couldn't check that right now: \(error.localizedDescription)"
+            }
+            explanationSending = false
+            if let sessionId {
+                await events.explainBack(course: course, idx: currentLessonIdx,
+                                         answer: trimmed, feedback: explanationFeedback ?? "",
+                                         sessionId: sessionId)
+            }
+        }
+    }
+
+    // MARK: - Error as curriculum
+
+    /// True when the last command failed — the moment to offer an explanation.
+    var lastCommandFailed: Bool {
+        guard let code = terminal?.lastExitCode else { return false }
+        return code != 0
+    }
+
+    /// Explains the failure the student just hit, without making them leave the terminal.
+    func explainLastError() {
+        guard let terminal, let code = terminal.lastExitCode, code != 0, !errorHelpLoading else { return }
+        noteActivity()
+        errorHelpLoading = true
+        errorHelpText = nil
+
+        let command = terminal.lastCommand ?? "(unknown command)"
+        let output = terminal.lastStdout
+        let context = activeCourse.flatMap { course -> String? in
+            guard currentLessonIdx < course.lessons.count else { return nil }
+            return "\(course.lessons[currentLessonIdx].title) — \(course.lessons[currentLessonIdx].challenge.task)"
+        }
+
+        Task {
+            do {
+                errorHelpText = try await claude.explainError(
+                    command: command, output: output, exitCode: code, lessonContext: context
+                )
+            } catch {
+                errorHelpText = "Couldn't explain that right now: \(error.localizedDescription)"
+            }
+            errorHelpLoading = false
+        }
+    }
+
+    // MARK: - Review
+
+    /// Lessons due for another look, weakest first.
+    func dueReviewItems() -> [ReviewItem] {
+        ReviewPlanner.dueItems(in: resultsStore.all(), courses: courses)
+    }
+
+    /// Opens a course at the lesson being reviewed.
+    func startReview(_ item: ReviewItem) {
+        guard let course = courses.first(where: { $0.id == item.courseId }) else { return }
+        openCourse(course)
+        goToLesson(item.lessonIdx)
     }
 
     /// Called from every student-initiated action. Reopens a session if the previous one timed
@@ -433,6 +519,10 @@ final class AppSession: ObservableObject {
         isCheckingFinal = false
         lessonChat = []
         showLessonChat = false
+        explanationFeedback = nil
+        explanationSending = false
+        errorHelpText = nil
+        errorHelpLoading = false
     }
 
     /// Writes the current lesson's `starter_files` into the sandbox so challenges that assume a
@@ -537,9 +627,11 @@ final class AppSession: ObservableObject {
     }
 
     /// Restarts a course from the first lesson, keeping prior results as a new attempt.
+    /// A retake also gets a clean workspace — otherwise the challenges are already solved.
     func retakeCourse(_ course: Course) {
         resultsStore.startNewAttempt(courseId: course.id, subject: course.subject, title: course.title, lessonCount: course.lessons.count)
         progressStore.set(CourseProgress(lessonIdx: 0, completed: false), for: course.id)
+        StudentSandbox.shared.allocateFresh(forCourseId: course.id)
         resultsRevision += 1
         openCourse(course)
     }

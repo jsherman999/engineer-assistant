@@ -74,6 +74,8 @@ enum SessionExport {
         case .agentCommand:
             let mark = (e.bool("allowed") ?? false) ? "" : " [refused]"
             return "agent ran\(mark): \(e.string("command") ?? "") → \(e.string("output") ?? "")"
+        case .explainBack:
+            return "explained: \"\(e.string("answer") ?? "")\" → \(e.string("feedback") ?? "")"
         case .destructiveBlocked:
             let ran = (e.bool("ran_anyway") ?? false) ? "ran anyway" : "cancelled"
             return "destructive command warned (\(ran)): \(e.string("command") ?? "") — \(e.string("headline") ?? "")"

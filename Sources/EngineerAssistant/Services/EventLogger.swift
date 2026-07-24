@@ -96,6 +96,13 @@ struct EventLogger {
                      payload: ["hint_text": AnyCodable(text)])
     }
 
+    /// The student's own account of why their solution worked. Worth recording separately from
+    /// pass/fail: it is the clearest signal an instructor gets of whether they actually understood.
+    func explainBack(course: Course, idx: Int, answer: String, feedback: String, sessionId: String) async {
+        await append(.explainBack, sessionId: sessionId, courseId: course.id, lessonIdx: idx,
+                     payload: ["answer": AnyCodable(answer), "feedback": AnyCodable(feedback)])
+    }
+
     func skipUsed(course: Course, idx: Int, panel: String, sessionId: String) async {
         await append(.skipUsed, sessionId: sessionId, courseId: course.id, lessonIdx: idx,
                      payload: ["from_panel": AnyCodable(panel)])
