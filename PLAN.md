@@ -308,8 +308,37 @@ Each phase ends with an explicit verification step. Don't move on without it.
 
 ---
 
-## Open Items (none blocking Phase 1)
+## Open Items
 
-- Touch ID unlock — add when hardware is confirmed.
-- LLM-as-judge prompt design — defer to Phase 4 when first open-ended challenge appears.
-- HTML export styling — defer to Phase 7.
+- Touch ID unlock — still not implemented; add when hardware is confirmed.
+- LLM-as-judge prompt design — done (Phase 4).
+- HTML export styling — done (Phase 7).
+
+## Built beyond this plan
+
+This document is the original design. The following were added after it and are described in
+[README.md](./README.md):
+
+- **Capstone + seeded starter files.** `final_challenge` is rendered and verified; `starter_files`
+  are written into the sandbox before a lesson so challenges can start from a broken script or a
+  data file rather than an empty directory.
+- **Session boundaries.** `session_end` is written on quit and after 30 minutes idle, so the
+  dashboard shows real durations. The plan called for this; it took until Phase 12 to land.
+- **Destructive-command guard.** The plan's safety model asked for this. It matters more than
+  originally scoped, because Ask mode deliberately runs an *unsandboxed* shell in the real home
+  directory — a deviation the plan did not anticipate.
+- **Diagrams.** Lessons carry an optional `visual` block (`tree` / `pipeline` / `permissions` /
+  `flow`) and demos carry per-token annotations, so structural ideas get a picture. Nothing in the
+  original plan was graphical beyond the terminal.
+- **Teaching modes.** Predict-before-reveal on demos, explain-back after a pass, spaced-repetition
+  review derived from the existing gradebook, and inline explanation of failed commands.
+- **Persistent course workspaces.** Each course keeps one sandbox dir across sessions; retakes
+  allocate a fresh one.
+
+### Deliberate deviations from this plan
+
+- Event store is JSONL, not SQLite/GRDB.
+- Per-lesson `network: true` opt-in was never added; the macOS sandbox always allows network so
+  `brew`, `curl`, and `git` work.
+- Per-command 30s timeout applies to helper processes (`ProcessRunner`), not to the interactive
+  PTY, where a long-running command is legitimate.

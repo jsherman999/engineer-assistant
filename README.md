@@ -23,6 +23,12 @@ Pre-alpha, actively being built in phases (see [PLAN.md](./PLAN.md)).
 | 8 | Polish (Claude hints, lesson-scoped Ask sidebar, preferences) | ✅ |
 | 9 | Saved lesson results + retake + purge (student & instructor views) | ✅ |
 | 10 | Persistent unrestricted Ask-mode shell + short-path `~/students` sandboxes | ✅ |
+| 11 | Capstone `final_challenge`, seeded `starter_files`, Recap panel, Skip control | ✅ |
+| 12 | Session end on quit/idle, destructive-command guard, replay playback | ✅ |
+| 13 | Streaming Ask agent on Claude Opus 5, refusal handling | ✅ |
+| 14 | Graphical lesson visuals, lesson rail, live sandbox tree, command anatomy | ✅ |
+| 15 | Predict-before-reveal, explain-back, spaced-repetition review, error help | ✅ |
+| 16 | Instructor charts + student-facing progress view | ✅ |
 
 ### Notable implementation choices (differ from the original PLAN)
 
@@ -31,7 +37,11 @@ Pre-alpha, actively being built in phases (see [PLAN.md](./PLAN.md)).
 - **Container runtime auto-detects and prefers Apple's `container`** (best on macOS 26+ Apple Silicon), then Podman, then Docker — all behind one abstraction. Its background service is auto-started (`container system start` / `podman machine start`) before a Linux course launches, so the student never sees a raw "XPC connection error".
 - **Ask mode is an unrestricted shell; Course mode is sandboxed.** Ask mode runs `/bin/zsh` directly in the user's real `$HOME` (full network/filesystem — a real Terminal for learning about this Mac). Course mode runs under `sandbox-exec`: **network is allowed** and writes are confined to the course dir, `/private/tmp`, and the Homebrew prefix (`/opt/homebrew`), so `brew info`/`install`, `curl`, and `git` work while the rest of the system (home, `/System`, `/usr`) stays write-protected. Note `brew install` in a course writes to the **real shared Homebrew**. Both modes put Homebrew on `PATH`. (Under `sandbox-exec`, `/bin/ps`/`pstree`/`top` can't run — a macOS limitation — so those only work in Ask mode.)
 - **Sandbox working dirs are short, home-relative paths** (`~/students/student<N>` per course open, `~/students/ask` for Ask mode) so the shell prompt stays clean instead of a long Application-Support/UUID path.
-- **Ask Mode is a tool-using agent with a read-only allowlist.** Claude answers machine-specific questions by calling a `run_command` tool, gated to a small allowlist of read-only commands (`ipconfig`, `sw_vers`, `system_profiler`, `df`, `ps`, …) with shell operators blocked — so it can read this Mac's real state but has no write/destructive power. Each command it runs is shown in the chat and logged (`agent_command` events) for the instructor.
+- **Ask Mode is a tool-using agent with a read-only allowlist.** Claude answers machine-specific questions by calling a `run_command` tool, gated to a small allowlist of read-only commands (`ipconfig`, `sw_vers`, `system_profiler`, `df`, `ps`, …) with shell operators blocked — so it can read this Mac's real state but has no write/destructive power. Each command it runs is shown in the chat and logged (`agent_command` events) for the instructor. The agent streams, including across tool calls.
+- **A destructive-command guard sits in front of both shells.** Pressing Return on `rm -rf`, a wildcard `rm`, `dd of=/dev/…`, `mkfs`, a fork bomb, `curl | sh`, or `chmod 777` holds the Return back and explains what the command would do before the student chooses. This matters most in Ask mode, which is deliberately unsandboxed and runs in the real home directory. `rm` is matched by parsing flags, not by regex, so `-rf`, `-fr`, and `-r -f` are all caught; the false-positive set is tested, because a guard that interrupts ordinary commands is worse than none.
+- **Lessons can carry a diagram.** A lesson's optional `visual` block picks one of four renderers the player owns — `tree`, `pipeline`, `permissions`, `flow` — so a structural idea gets a picture instead of a paragraph. Demos carry a token-by-token `parts` breakdown, rendered as clickable annotations on the command.
+- **Review is derived from the gradebook, not a second database.** `results.json` already records per lesson whether the student passed, whether they needed a hint, and when, which is everything a spacing schedule needs. Failed lessons return the next day, hinted ones in two days, clean passes stretch 3 → 7 → 21 → 60. Reviewing records a new attempt, which feeds the next interval.
+- **A course keeps one workspace.** Earlier builds allocated a fresh `student<N>` on every open, which silently prevented multi-session work. Retaking a course allocates a fresh one so challenges aren't already solved.
 
 ## Requirements
 
@@ -54,6 +64,9 @@ swift run EngineerAssistant
 ```
 
 Or open `Package.swift` in Xcode and run the `EngineerAssistant` scheme.
+
+The toolbar has **Courses** (library), **Review** (lessons due for another look, badged with the
+count), **Progress** (the student's own record), and **Settings**.
 
 On first launch, open **Settings** (gear icon) and paste your Anthropic API key — it is stored only in the macOS Keychain. Then pick **Ask** or **Course** at the top of the chat. Generated courses appear under the **Courses** button, where you can resume, **retake** from the start, review per-lesson **results**, or **delete** a course. The instructor dashboard (⌘⇧I, PIN-gated) shows recorded sessions and a per-course gradebook.
 
@@ -94,13 +107,27 @@ EA_RUN_CONTAINER_TESTS=1 swift test --filter ContainerIntegrationTests
 ```
 
 Sandbox working dirs live under the user's home as `~/students/student<N>` so the shell shows a
-short, friendly path. A fresh `student<N>` is allocated every time a course is opened (the counter
-only ever climbs); purging a course removes all the dirs it allocated. Ask mode runs an
+short, friendly path. Each course keeps its workspace across sessions so work can span sittings;
+retaking a course allocates a fresh one (the counter only ever climbs) and purging a course
+removes every dir it allocated. Ask mode runs an
 **unrestricted** shell (no sandbox) in the user's real home — a real Terminal for learning about
 this Mac, with network and package installs allowed — shown beside the chat. Its short-prompt
 zshrc lives in `~/students/ask` (used as `ZDOTDIR`).
 
 Keychain holds `anthropic_api_key`.
+
+## Course schema
+
+Courses are generated against a fixed schema, so one player renders every course. Beyond the
+original shape, a lesson may now include:
+
+| Field | Purpose |
+|---|---|
+| `recap_md` | The fifth panel: 2–3 bullets naming skills gained. |
+| `visual` | An optional diagram — `tree`, `pipeline`, `permissions`, or `flow`. |
+| `demos[].parts` | Token-by-token breakdown of a command, rendered as clickable annotations. |
+| `challenge.starter_files` | Files written into the sandbox before the lesson, so "fix this script" challenges are solvable. `starter_state` remains the prose description and creates nothing. |
+| `final_challenge` | The capstone, offered alongside the last lesson. |
 
 ## Project layout
 

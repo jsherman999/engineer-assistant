@@ -321,6 +321,9 @@ private struct CourseResultsDetail: View {
             Divider()
             if let results, !results.attempts.isEmpty {
                 ScrollView {
+                    CourseInsightsView(course: course, results: results)
+                        .padding(12)
+                    Divider()
                     LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(sortedAttempts(results)) { a in
                             HStack(alignment: .top, spacing: 8) {
