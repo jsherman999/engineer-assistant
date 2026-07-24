@@ -14,6 +14,8 @@ enum Theme {
     static let demos     = Color(red: 0.26, green: 0.70, blue: 0.46) // green
     static let practice  = Color(red: 0.90, green: 0.64, blue: 0.28) // amber
     static let challenge = Color(red: 0.67, green: 0.46, blue: 0.86) // purple
+    static let finalChallenge = Color(red: 0.88, green: 0.36, blue: 0.42) // red — the capstone
+    static let recap = Color(red: 0.36, green: 0.62, blue: 0.66) // teal
     static let headerTint = Color(red: 0.30, green: 0.56, blue: 0.92)
 
     // Terminal pane

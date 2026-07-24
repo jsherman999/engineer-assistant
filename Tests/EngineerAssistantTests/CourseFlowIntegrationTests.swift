@@ -19,7 +19,7 @@ final class CourseFlowIntegrationTests: XCTestCase {
         let verify = VerifyCheck(type: .fileExists, value: nil, path: "hello.txt", exitCode: nil)
         let lessons = (0..<3).map { i in
             Lesson(title: "Lesson \(i)", conceptMd: "c", demos: [], practicePrompt: "p",
-                   challenge: Challenge(task: "t", starterState: nil, verify: verify))
+                   challenge: Challenge(task: "t", starterState: nil, starterFiles: nil, verify: verify))
         }
         let draft = CourseDraft(title: "Flow Course", description: "d", estimatedMinutes: 10,
                                 environment: .macos, prerequisites: [], lessons: lessons, finalChallenge: nil)
@@ -45,13 +45,43 @@ final class CourseFlowIntegrationTests: XCTestCase {
         XCTAssertEqual(results.results(for: course.id)?.passedCount, 0, "fresh attempt shows nothing passed yet")
         XCTAssertEqual(results.results(for: course.id)?.attempts.count, 2, "prior attempt kept as history")
 
-        // clearLessonResults: purge one lesson across attempts.
+        // clearLessonResults: purge one lesson in the CURRENT attempt only, so the student can
+        // redo it without erasing what earlier attempts recorded.
         let a = LessonAttempt(id: UUID().uuidString, attempt: 2, lessonIdx: 0, lessonTitle: "Lesson 0",
                               passed: true, detail: "ok", command: "touch hello.txt", hintUsed: true, timestamp: Date())
         results.record(a, courseId: course.id, subject: course.subject, title: course.title, lessonCount: 3)
-        results.clearLesson(courseId: course.id, lessonIdx: 0)
+        results.clearLesson(courseId: course.id, lessonIdx: 0, attempt: 2)
         XCTAssertNil(results.results(for: course.id)?.latest(lessonIdx: 0, attempt: 2), "cleared lesson has no result")
-        XCTAssertNil(results.results(for: course.id)?.latest(lessonIdx: 0, attempt: 1), "clear removes it from history too")
+        XCTAssertNotNil(results.results(for: course.id)?.latest(lessonIdx: 0, attempt: 1), "attempt 1 history survives")
+
+        // Passing nil clears every attempt (used when a course is reset wholesale).
+        results.clearLesson(courseId: course.id, lessonIdx: 0, attempt: nil)
+        XCTAssertNil(results.results(for: course.id)?.latest(lessonIdx: 0, attempt: 1), "nil attempt purges history")
+    }
+
+    /// Regenerating a subject must keep the course id so progress and results stay attached
+    /// instead of being orphaned under an id nothing references any more.
+    func testRegenerateKeepsCourseIdAndResults() throws {
+        let coursesDir = dir.appendingPathComponent("courses")
+        try FileManager.default.createDirectory(at: coursesDir, withIntermediateDirectories: true)
+        let courseStore = FileCourseStore(directory: coursesDir)
+        let results = FileResultsStore(url: dir.appendingPathComponent("results.json"))
+        let original = makeCourse()
+        try courseStore.save(original)
+        results.record(LessonAttempt(id: "x", attempt: 1, lessonIdx: 0, lessonTitle: "Lesson 0", passed: true,
+                                     detail: "ok", command: "c", hintUsed: false, timestamp: Date()),
+                       courseId: original.id, subject: original.subject, title: original.title, lessonCount: 3)
+
+        // What CourseGenerator does on forceRefresh: reuse the cached course's id.
+        let existing = courseStore.load(subject: original.subject)
+        let draft = CourseDraft(title: "Flow Course v2", description: "d2", estimatedMinutes: 12,
+                                environment: .macos, prerequisites: [], lessons: original.lessons, finalChallenge: nil)
+        let regenerated = Course(id: existing?.id ?? UUID().uuidString, subject: original.subject, draft: draft)
+        try courseStore.save(regenerated)
+
+        XCTAssertEqual(regenerated.id, original.id, "regenerated course keeps its id")
+        XCTAssertEqual(courseStore.load(subject: original.subject)?.title, "Flow Course v2", "content was refreshed")
+        XCTAssertEqual(results.results(for: regenerated.id)?.passedCount, 1, "saved results survive a regenerate")
     }
 
     /// Mirrors AppSession.deleteCourse: course JSON + progress + results + sandbox dir all purged.

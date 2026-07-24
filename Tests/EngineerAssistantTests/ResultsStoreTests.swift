@@ -45,7 +45,7 @@ final class ResultsStoreTests: XCTestCase {
         store.record(attempt(0, passed: true, at: 1), courseId: "c1", subject: "s", title: "t", lessonCount: 2)
         store.record(attempt(1, passed: true, at: 2), courseId: "c1", subject: "s", title: "t", lessonCount: 2)
 
-        store.clearLesson(courseId: "c1", lessonIdx: 0)
+        store.clearLesson(courseId: "c1", lessonIdx: 0, attempt: 1)
         XCTAssertEqual(store.results(for: "c1")!.passedCount, 1)
         XCTAssertNil(store.results(for: "c1")!.latest(lessonIdx: 0, attempt: 1))
 

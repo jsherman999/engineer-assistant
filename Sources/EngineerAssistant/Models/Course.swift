@@ -39,14 +39,27 @@ struct Demo: Codable, Equatable {
     }
 }
 
+/// A file the sandbox must already contain before the student starts a challenge, so tasks
+/// like "fix the broken script" or "count the lines in data.txt" have something to act on.
+struct StarterFile: Codable, Equatable {
+    let path: String
+    let content: String
+    /// Set for scripts the student is meant to run (chmod +x on macOS, container `chmod` on Linux).
+    let executable: Bool?
+}
+
 struct Challenge: Codable, Equatable {
     let task: String
+    /// Prose describing the starting point, shown to the student.
     let starterState: String?
+    /// Files actually written into the sandbox before the lesson begins.
+    let starterFiles: [StarterFile]?
     let verify: VerifyCheck
 
     enum CodingKeys: String, CodingKey {
         case task
         case starterState = "starter_state"
+        case starterFiles = "starter_files"
         case verify
     }
 }

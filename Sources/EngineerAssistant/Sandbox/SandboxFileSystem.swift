@@ -5,6 +5,9 @@ import Foundation
 protocol SandboxFileSystem: Sendable {
     func fileExists(_ path: String) async -> Bool
     func readFile(_ path: String) async -> String?
+    /// Seeds a challenge's `starter_files` before the student begins. Parent directories are
+    /// created; `executable` marks scripts runnable.
+    func writeFile(_ path: String, content: String, executable: Bool) async
 }
 
 /// macOS sandbox: paths resolve against the per-course working directory (the shell's HOME).
@@ -46,6 +49,16 @@ struct HostSandboxFileSystem: SandboxFileSystem {
         }
         return nil
     }
+
+    func writeFile(_ path: String, content: String, executable: Bool) async {
+        // Always seed inside the sandbox, even if the course wrote an absolute path.
+        let url = path.hasPrefix("/") ? (homeRelativeFallback(path) ?? resolve(path)) : resolve(path)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? content.write(to: url, atomically: true, encoding: .utf8)
+        if executable {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+    }
 }
 
 /// Linux sandbox: paths are checked inside the running container via `<engine> exec`. The
@@ -86,5 +99,16 @@ struct ContainerFileSystem: SandboxFileSystem {
             if exit == 0 { return output }
         }
         return nil
+    }
+
+    func writeFile(_ path: String, content: String, executable: Bool) async {
+        // Seed under /root (the container's HOME and working dir), and move the content over
+        // base64 so newlines, quotes, and shell metacharacters survive the `sh -c` round-trip.
+        let target = candidates(path).last ?? path
+        let quoted = shellSingleQuote(target)
+        let b64 = Data(content.utf8).base64EncodedString()
+        var script = "mkdir -p \"$(dirname \(quoted))\" && printf '%s' \(shellSingleQuote(b64)) | base64 -d > \(quoted)"
+        if executable { script += " && chmod +x \(quoted)" }
+        _ = await ProcessRunner.run(enginePath, ["exec", containerName, "sh", "-c", script])
     }
 }

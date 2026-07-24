@@ -24,13 +24,19 @@ struct CourseResults: Codable, Equatable {
     var currentAttempt: Int
     var attempts: [LessonAttempt]
 
-    /// Lesson indices that have at least one passing check in the given attempt.
+    /// Lesson indices that have at least one passing check in the given attempt. The capstone
+    /// is recorded at index `lessonCount`, so it is excluded from lesson counts.
     func passedLessons(inAttempt attempt: Int) -> Set<Int> {
-        Set(attempts.filter { $0.attempt == attempt && $0.passed }.map(\.lessonIdx))
+        Set(attempts.filter { $0.attempt == attempt && $0.passed && $0.lessonIdx < lessonCount }.map(\.lessonIdx))
     }
 
     /// Lessons passed in the current attempt.
     var passedCount: Int { passedLessons(inAttempt: currentAttempt).count }
+
+    /// True once the course's capstone has been passed in the current attempt.
+    var finalChallengePassed: Bool {
+        attempts.contains { $0.attempt == currentAttempt && $0.passed && $0.lessonIdx == lessonCount }
+    }
 
     /// Most recent check of a lesson within an attempt (latest timestamp).
     func latest(lessonIdx: Int, attempt: Int) -> LessonAttempt? {
@@ -47,7 +53,9 @@ protocol ResultsStore {
     /// Bumps the attempt counter for a fresh retake and returns the new attempt number.
     @discardableResult
     func startNewAttempt(courseId: String, subject: String, title: String, lessonCount: Int) -> Int
-    func clearLesson(courseId: String, lessonIdx: Int)
+    /// Clears one lesson's saved results. Scoped to `attempt` so clearing the lesson you are
+    /// retaking never destroys the history of earlier attempts; pass nil to purge every attempt.
+    func clearLesson(courseId: String, lessonIdx: Int, attempt: Int?)
     func remove(courseId: String)
 }
 
@@ -125,10 +133,10 @@ struct FileResultsStore: ResultsStore {
         return cr.currentAttempt
     }
 
-    func clearLesson(courseId: String, lessonIdx: Int) {
+    func clearLesson(courseId: String, lessonIdx: Int, attempt: Int?) {
         var map = load()
         guard var cr = map[courseId] else { return }
-        cr.attempts.removeAll { $0.lessonIdx == lessonIdx }
+        cr.attempts.removeAll { $0.lessonIdx == lessonIdx && (attempt == nil || $0.attempt == attempt) }
         map[courseId] = cr
         save(map)
     }

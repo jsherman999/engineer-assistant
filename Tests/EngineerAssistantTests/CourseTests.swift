@@ -61,7 +61,7 @@ final class CourseTests: XCTestCase {
                     conceptMd: "concept",
                     demos: [Demo(command: "ls", expectedOutput: "...", explanation: "lists files")],
                     practicePrompt: "explore",
-                    challenge: Challenge(task: "do it", starterState: nil, verify: VerifyCheck(type: .exitCode, value: nil, path: nil, exitCode: 0))
+                    challenge: Challenge(task: "do it", starterState: nil, starterFiles: nil, verify: VerifyCheck(type: .exitCode, value: nil, path: nil, exitCode: 0))
                 )
             ],
             finalChallenge: nil

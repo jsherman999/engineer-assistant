@@ -33,6 +33,8 @@ final class SandboxTerminalController: ObservableObject {
     private let runtime: ContainerRuntime?
     private var parser = ShellTeeParser()
     private var profileURL: URL?
+    /// Tail of the serialized chain of pending event-log writes (see `log`).
+    private var logTail: Task<Void, Never>?
 
     private static let linuxImage = "docker.io/library/ubuntu:latest"
     /// PATH including Homebrew (Apple Silicon + Intel) so host-installed tools resolve.
@@ -256,22 +258,23 @@ final class SandboxTerminalController: ObservableObject {
         Task.detached { _ = await ProcessRunner.run(path, ["rm", "-f", name]) }
     }
 
+    /// Appends a PTY chunk to the event log. Chunks are chained onto `logTail` rather than
+    /// dispatched independently: `Task.detached` per chunk would let two writes race and land
+    /// out of order, which scrambles the instructor's terminal replay. Only `text` is stored —
+    /// the previous `bytes_b64` copy doubled the size of a log that never rotates.
     private func log(_ type: EventType, data: Data) {
-        let courseId = self.courseId
-        let sessionId = self.sessionId
+        let event = LogEvent(
+            sessionId: sessionId,
+            timestamp: Date(),
+            type: type,
+            courseId: courseId,
+            lessonIdx: nil,
+            payload: ["text": AnyCodable(String(decoding: data, as: UTF8.self))]
+        )
         let store = self.eventStore
-        Task.detached {
-            let event = LogEvent(
-                sessionId: sessionId,
-                timestamp: Date(),
-                type: type,
-                courseId: courseId,
-                lessonIdx: nil,
-                payload: [
-                    "bytes_b64": AnyCodable(data.base64EncodedString()),
-                    "text": AnyCodable(String(decoding: data, as: UTF8.self))
-                ]
-            )
+        let previous = logTail
+        logTail = Task {
+            await previous?.value
             try? await store.append(event)
         }
     }

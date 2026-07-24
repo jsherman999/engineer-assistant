@@ -27,6 +27,10 @@ final class AppSession: ObservableObject {
     @Published var askTerminal: SandboxTerminalController? = nil
     @Published var isChecking: Bool = false
     @Published var challengeOutcome: VerifyOutcome? = nil
+    /// Separate state for the course's capstone `final_challenge`, which is offered alongside
+    /// the last lesson's own challenge.
+    @Published var isCheckingFinal: Bool = false
+    @Published var finalOutcome: VerifyOutcome? = nil
     @Published var hintRevealed: Bool = false
     @Published var hintText: String? = nil
     @Published var hintLoading: Bool = false
@@ -294,6 +298,7 @@ final class AppSession: ObservableObject {
             )
             try controller.start()
             terminal = controller
+            seedStarterFiles()
         } catch {
             lastError = "Sandbox failed to start: \(error.localizedDescription)"
             terminal = nil
@@ -306,6 +311,7 @@ final class AppSession: ObservableObject {
         let nextIdx = currentLessonIdx + 1
         currentLessonIdx = nextIdx
         resetChallengeState()
+        seedStarterFiles()
         saveProgress(course: course)
         Task {
             guard let sessionId else { return }
@@ -315,33 +321,113 @@ final class AppSession: ObservableObject {
     }
 
     func previousLesson() {
-        guard currentLessonIdx > 0 else { return }
+        guard let course = activeCourse, currentLessonIdx > 0 else { return }
         currentLessonIdx -= 1
         resetChallengeState()
-        if let course = activeCourse { saveProgress(course: course) }
+        seedStarterFiles()
+        saveProgress(course: course)
+        let idx = currentLessonIdx
+        Task {
+            guard let sessionId else { return }
+            await logLessonStart(course: course, idx: idx, sessionId: sessionId)
+        }
+    }
+
+    /// Jumps straight to a lesson from the lesson rail.
+    func goToLesson(_ idx: Int) {
+        guard let course = activeCourse, idx >= 0, idx < course.lessons.count, idx != currentLessonIdx else { return }
+        currentLessonIdx = idx
+        resetChallengeState()
+        seedStarterFiles()
+        saveProgress(course: course)
+        Task {
+            guard let sessionId else { return }
+            await logLessonStart(course: course, idx: idx, sessionId: sessionId)
+        }
+    }
+
+    /// Records a skip so the instructor can see the student moved on without passing.
+    func skipCurrentLesson() {
+        guard let course = activeCourse, let sessionId, currentLessonIdx < course.lessons.count else { return }
+        let idx = currentLessonIdx
+        Task { await logSkipUsed(course: course, idx: idx, panel: "challenge", sessionId: sessionId) }
+        if idx < course.lessons.count - 1 {
+            nextLesson()
+        }
     }
 
     private func resetChallengeState() {
         challengeOutcome = nil
+        finalOutcome = nil
         hintRevealed = false
         hintText = nil
         hintLoading = false
         isChecking = false
+        isCheckingFinal = false
         lessonChat = []
         showLessonChat = false
     }
 
+    /// Writes the current lesson's `starter_files` into the sandbox so challenges that assume a
+    /// starting point ("fix this script", "count the lines in data.txt") are actually solvable.
+    /// Runs on every lesson entry; seeding is idempotent because it overwrites by path.
+    private func seedStarterFiles() {
+        guard let course = activeCourse, currentLessonIdx < course.lessons.count,
+              let terminal else { return }
+        var files = course.lessons[currentLessonIdx].challenge.starterFiles ?? []
+        if isLastLesson, let final = course.finalChallenge?.starterFiles { files += final }
+        guard !files.isEmpty else { return }
+        let fileSystem = terminal.fileSystem
+        Task {
+            for file in files {
+                await fileSystem.writeFile(file.path, content: file.content, executable: file.executable ?? false)
+            }
+        }
+    }
+
+    var isLastLesson: Bool {
+        guard let course = activeCourse else { return false }
+        return currentLessonIdx >= course.lessons.count - 1
+    }
+
     func checkCurrentChallenge() {
-        guard let course = activeCourse, let sessionId,
-              currentLessonIdx < course.lessons.count else { return }
-        let challenge = course.lessons[currentLessonIdx].challenge
+        guard let course = activeCourse, currentLessonIdx < course.lessons.count else { return }
+        runVerification(
+            challenge: course.lessons[currentLessonIdx].challenge,
+            idx: currentLessonIdx,
+            title: course.lessons[currentLessonIdx].title,
+            setChecking: { self.isChecking = $0 },
+            setOutcome: { self.challengeOutcome = $0 }
+        )
+    }
+
+    /// Verifies the course's capstone. It is offered alongside the last lesson and recorded
+    /// under a synthetic index past the real lessons so it never collides with lesson results.
+    func checkFinalChallenge() {
+        guard let course = activeCourse, let final = course.finalChallenge else { return }
+        runVerification(
+            challenge: final,
+            idx: course.lessons.count,
+            title: "Final Challenge",
+            setChecking: { self.isCheckingFinal = $0 },
+            setOutcome: { self.finalOutcome = $0 }
+        )
+    }
+
+    /// Shared verify → record → log path for both the per-lesson challenge and the capstone.
+    private func runVerification(challenge: Challenge,
+                                 idx: Int,
+                                 title: String,
+                                 setChecking: @escaping (Bool) -> Void,
+                                 setOutcome: @escaping (VerifyOutcome?) -> Void) {
+        guard let course = activeCourse, let sessionId else { return }
         guard let terminal else {
-            challengeOutcome = VerifyOutcome(passed: false, detail: "Start the sandbox shell first.")
+            setOutcome(VerifyOutcome(passed: false, detail: "Start the sandbox shell first."))
             return
         }
 
-        isChecking = true
-        challengeOutcome = nil
+        setChecking(true)
+        setOutcome(nil)
         hintRevealed = false
 
         let context = VerifyContext(
@@ -351,31 +437,27 @@ final class AppSession: ObservableObject {
             fileSystem: terminal.fileSystem
         )
         let command = terminal.lastCommand ?? ""
-        let idx = currentLessonIdx
 
         Task {
             await logChallengeAttempt(course: course, idx: idx, command: command, sessionId: sessionId)
             let outcome = await verifier.verify(challenge.verify, context: context)
-            challengeOutcome = outcome
-            isChecking = false
-            recordResult(course: course, idx: idx, outcome: outcome, command: command)
-            if outcome.passed {
-                await logChallengeResult(.challengePass, course: course, idx: idx, verify: challenge.verify, detail: outcome.detail, sessionId: sessionId)
-            } else {
-                await logChallengeResult(.challengeFail, course: course, idx: idx, verify: challenge.verify, detail: outcome.detail, sessionId: sessionId)
-            }
+            setOutcome(outcome)
+            setChecking(false)
+            recordResult(course: course, idx: idx, title: title, outcome: outcome, command: command)
+            await logChallengeResult(outcome.passed ? .challengePass : .challengeFail,
+                                     course: course, idx: idx, verify: challenge.verify,
+                                     detail: outcome.detail, sessionId: sessionId)
         }
     }
 
     /// Saves a structured per-lesson result for later review by the student or instructor.
-    private func recordResult(course: Course, idx: Int, outcome: VerifyOutcome, command: String) {
-        guard idx < course.lessons.count else { return }
+    private func recordResult(course: Course, idx: Int, title: String, outcome: VerifyOutcome, command: String) {
         let attemptNum = resultsStore.results(for: course.id)?.currentAttempt ?? 1
         let record = LessonAttempt(
             id: UUID().uuidString,
             attempt: attemptNum,
             lessonIdx: idx,
-            lessonTitle: course.lessons[idx].title,
+            lessonTitle: title,
             passed: outcome.passed,
             detail: outcome.detail,
             command: command,
@@ -394,9 +476,11 @@ final class AppSession: ObservableObject {
         openCourse(course)
     }
 
-    /// Clears the saved results for one lesson so it can be re-taken cleanly.
+    /// Clears the saved results for one lesson in the current attempt so it can be re-taken
+    /// cleanly. Earlier attempts stay in the gradebook.
     func clearLessonResults(courseId: String, lessonIdx: Int) {
-        resultsStore.clearLesson(courseId: courseId, lessonIdx: lessonIdx)
+        let attempt = resultsStore.results(for: courseId)?.currentAttempt
+        resultsStore.clearLesson(courseId: courseId, lessonIdx: lessonIdx, attempt: attempt)
         resultsRevision += 1
     }
 
@@ -614,6 +698,18 @@ final class AppSession: ObservableObject {
             courseId: course.id,
             lessonIdx: idx,
             payload: ["hint_text": AnyCodable(text)]
+        )
+        try? await eventStore.append(event)
+    }
+
+    private func logSkipUsed(course: Course, idx: Int, panel: String, sessionId: String) async {
+        let event = LogEvent(
+            sessionId: sessionId,
+            timestamp: Date(),
+            type: .skipUsed,
+            courseId: course.id,
+            lessonIdx: idx,
+            payload: ["from_panel": AnyCodable(panel)]
         )
         try? await eventStore.append(event)
     }

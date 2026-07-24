@@ -19,6 +19,43 @@ final class VerifierTests: XCTestCase {
         )
     }
 
+    /// `starter_files` must land in the sandbox before the student starts, otherwise challenges
+    /// that assume a starting point are unpassable.
+    func testStarterFileIsSeededAndVerifiable() async {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let fs = HostSandboxFileSystem(root: dir)
+
+        await fs.writeFile("~/data.txt", content: "alpha\nbeta\n", executable: false)
+
+        let check = VerifyCheck(type: .fileContains, value: "beta", path: "~/data.txt", exitCode: nil)
+        let out = await verifier.verify(check, context: context(sandbox: dir))
+        XCTAssertTrue(out.passed, "seeded starter file should satisfy a file_contains check")
+    }
+
+    /// Nested paths and the executable bit both need to work for "fix this script" challenges.
+    func testStarterFileCreatesParentDirsAndExecutableBit() async {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let fs = HostSandboxFileSystem(root: dir)
+
+        await fs.writeFile("bin/greet.sh", content: "#!/bin/sh\necho hi\n", executable: true)
+
+        let path = dir.appendingPathComponent("bin/greet.sh").path
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path), "parent directory was created")
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: path), "executable bit was set")
+    }
+
+    /// A course that guesses an absolute home path still seeds inside the real sandbox.
+    func testStarterFileWithGuessedHomePathStaysInSandbox() async {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let fs = HostSandboxFileSystem(root: dir)
+
+        await fs.writeFile("/Users/student/notes.txt", content: "seeded", executable: false)
+
+        let seeded = await fs.readFile("~/notes.txt")
+        XCTAssertEqual(seeded, "seeded")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: "/Users/student/notes.txt"))
+    }
+
     func testExitCodeMatch() async {
         let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let check = VerifyCheck(type: .exitCode, value: nil, path: nil, exitCode: 0)

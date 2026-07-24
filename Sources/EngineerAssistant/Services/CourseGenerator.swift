@@ -78,11 +78,15 @@ final class CourseGenerator {
 
     func generate(subject: String, forceRefresh: Bool = false, containerGuidance: String? = nil) async throws -> GenerationResult {
         let trimmed = subject.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !forceRefresh, let cached = store.load(subject: trimmed) {
+        let existing = store.load(subject: trimmed)
+        if !forceRefresh, let cached = existing {
             return GenerationResult(course: cached, wasCached: true)
         }
         let draft = try await client.generateCourse(subject: trimmed, containerGuidance: containerGuidance)
-        let course = Course(subject: trimmed, draft: draft)
+        // Regenerating a subject keeps the previous course's id so the student's progress,
+        // saved results, and allocated sandbox dirs stay attached instead of being orphaned
+        // under an id nothing references any more.
+        let course = Course(id: existing?.id ?? UUID().uuidString, subject: trimmed, draft: draft)
         try store.save(course)
         return GenerationResult(course: course, wasCached: false)
     }

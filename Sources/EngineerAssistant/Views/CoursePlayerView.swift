@@ -75,6 +75,9 @@ struct CoursePlayerView: View {
                             section("Demos", Theme.demos) { demosList(lesson.demos) }
                             section("Practice", Theme.practice) { practiceText(lesson.practicePrompt) }
                             section("Challenge", Theme.challenge) { challengeBlock(lesson.challenge) }
+                            if session.isLastLesson, let final = course.finalChallenge {
+                                section("Final Challenge", Theme.finalChallenge) { finalChallengeBlock(final) }
+                            }
                             Spacer(minLength: 16)
                         }
                         .padding(18)
@@ -247,12 +250,80 @@ struct CoursePlayerView: View {
         }
     }
 
+    /// The capstone: same controls as a lesson challenge, but its own outcome state so the two
+    /// can be checked independently on the last lesson's page.
+    private func finalChallengeBlock(_ challenge: Challenge) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Put the whole course together.")
+                .font(.caption).foregroundStyle(.secondary)
+            MarkdownContentView(text: challenge.task)
+            starterView(challenge)
+            Text("Verify: \(verifyDescription(challenge.verify))")
+                .font(.caption).foregroundStyle(.secondary).italic()
+
+            HStack(spacing: 10) {
+                Button {
+                    session.checkFinalChallenge()
+                } label: {
+                    if session.isCheckingFinal {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Check Final Challenge", systemImage: "flag.checkered")
+                    }
+                }
+                .disabled(session.isCheckingFinal || session.terminal == nil)
+
+                if let outcome = session.finalOutcome {
+                    Label(outcome.passed ? "Course complete" : "Not yet",
+                          systemImage: outcome.passed ? "rosette" : "xmark.octagon.fill")
+                        .foregroundStyle(outcome.passed ? .green : .orange)
+                        .font(.callout)
+                }
+            }
+            if let outcome = session.finalOutcome {
+                Text(outcome.detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Shows the prose starting point plus any files the sandbox was actually seeded with, so
+    /// the student knows what already exists before they start typing.
+    @ViewBuilder
+    private func starterView(_ challenge: Challenge) -> some View {
+        if let starter = challenge.starterState, !starter.isEmpty {
+            Text("Starting point: \(starter)").font(.caption).foregroundStyle(.secondary)
+        }
+        if let files = challenge.starterFiles, !files.isEmpty {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(files.enumerated()), id: \.offset) { _, file in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(file.path)
+                                .font(.caption2.monospaced().bold())
+                                .foregroundStyle(Theme.demos)
+                            Text(file.content)
+                                .font(.system(.caption2, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(6)
+                                .background(Color.secondary.opacity(0.12))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            } label: {
+                Label("\(files.count) file\(files.count == 1 ? "" : "s") already in your sandbox",
+                      systemImage: "doc.badge.plus")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func challengeBlock(_ challenge: Challenge) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             MarkdownContentView(text: challenge.task)
-            if let starter = challenge.starterState, !starter.isEmpty {
-                Text("Starter state: \(starter)").font(.caption).foregroundStyle(.secondary)
-            }
+            starterView(challenge)
             Text("Verify: \(verifyDescription(challenge.verify))")
                 .font(.caption).foregroundStyle(.secondary).italic()
 

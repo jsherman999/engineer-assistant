@@ -208,6 +208,10 @@ final class ClaudeClient {
     - practice_prompt: one short paragraph inviting the student to experiment in the shell.
     - challenge: one specific task with a deterministic verify check.
 
+    Whenever a challenge assumes the student already has something to work with — a file to edit, a script to fix, data to count — you MUST supply it in `starter_files`, because the sandbox starts empty. `starter_state` is only the prose description shown to the student; it creates nothing. Prefer challenges that start from a seeded file: repairing a broken script or investigating real data teaches more than creating a file from scratch.
+
+    Also emit a `final_challenge`: one capstone task that combines what the lessons covered. It uses the same shape as a lesson challenge (including `starter_files`) and is offered alongside the last lesson.
+
     Verify types:
     - exit_code: { "type":"exit_code", "exit_code": N } -- last command's exit code equals N.
     - stdout_regex: { "type":"stdout_regex", "value": "regex" } -- last stdout matches regex.
@@ -232,11 +236,21 @@ final class ClaudeClient {
             ],
             "required": ["type"]
         ]
+        let starterFileSchema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "path": ["type": "string", "description": "Home-relative path, e.g. `~/data.txt` or `data.txt`."],
+                "content": ["type": "string", "description": "Exact file contents to write."],
+                "executable": ["type": "boolean", "description": "True for scripts the student runs."]
+            ],
+            "required": ["path", "content"]
+        ]
         let challengeSchema: [String: Any] = [
             "type": "object",
             "properties": [
                 "task": ["type": "string"],
                 "starter_state": ["type": "string"],
+                "starter_files": ["type": "array", "items": starterFileSchema],
                 "verify": verifySchema
             ],
             "required": ["task", "verify"]
@@ -274,7 +288,7 @@ final class ClaudeClient {
                 "lessons": ["type": "array", "items": lessonSchema, "minItems": 3, "maxItems": 5],
                 "final_challenge": challengeSchema
             ],
-            "required": ["title", "description", "estimated_minutes", "environment", "prerequisites", "lessons"]
+            "required": ["title", "description", "estimated_minutes", "environment", "prerequisites", "lessons", "final_challenge"]
         ]
     }
 
