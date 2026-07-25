@@ -266,18 +266,30 @@ struct CoursePlayerView: View {
         MarkdownContentView(text: md)
     }
 
+    /// The home path this course's shell actually uses, for correcting the placeholder paths
+    /// (`/Users/student`) a course invents before its workspace exists.
+    private var sandboxHome: String? { session.terminal?.sandboxHomePath }
+
     private func demosList(_ demos: [Demo]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(demos.enumerated()), id: \.offset) { _, demo in
                 VStack(alignment: .leading, spacing: 4) {
-                    CommandAnatomyView(command: demo.command, parts: demo.parts)
+                    // Both the command and its output are rewritten: they are one unit, and the
+                    // command is copy-pasteable, so a demo that shows a real path but tells the
+                    // student to `cd` to a fake one is no better than the original mismatch.
+                    CommandAnatomyView(command: rewrite(demo.command), parts: demo.parts)
                     if !demo.expectedOutput.isEmpty {
-                        PredictedOutputView(expected: demo.expectedOutput)
+                        PredictedOutputView(expected: rewrite(demo.expectedOutput))
                     }
                     Text(demo.explanation).font(.callout).foregroundStyle(.secondary)
                 }
             }
         }
+    }
+
+    private func rewrite(_ text: String) -> String {
+        guard let sandboxHome else { return text }
+        return SandboxPathText.rewrite(text, sandboxHome: sandboxHome)
     }
 
     private func practiceText(_ text: String) -> some View {

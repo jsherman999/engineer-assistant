@@ -234,7 +234,9 @@ final class ClaudeClient {
     - file_contains: { "type":"file_contains", "path":"~/name", "value":"substring" } -- file contains substring.
     - llm_judge: { "type":"llm_judge", "value":"criteria" } -- open-ended. Use sparingly.
 
-    All file paths — in the task text, starter_state, and verify checks — MUST be relative to the student's home directory: use `~/name` or a bare `name`. NEVER use an absolute path like `/Users/...` or `/home/...`; the sandbox HOME is a fresh, empty directory whose real location varies.
+    All file paths — in the task text, starter_state, starter_files, verify checks, and `visual` diagrams — MUST be relative to the student's home directory: use `~/name` or a bare `name`. NEVER use an absolute path like `/Users/...` or `/home/...`; the sandbox HOME is a directory whose real location varies per student and per course.
+
+    This applies to `expected_output` too. The student reads a demo's output as a prediction to check against their own screen, so inventing a home path teaches them that the lesson and their machine disagree. When a command genuinely prints an absolute path (`pwd`, `wc -l ~/file`), write the output using `~` — for example `expected_output` for `pwd` should be `~`, not `/Users/student`. Never write a made-up username.
 
     Aim for deterministic verifications (exit_code, file_exists, file_contains) wherever possible.
     Emit the course via the emit_course tool. Do not include any prose outside the tool call.

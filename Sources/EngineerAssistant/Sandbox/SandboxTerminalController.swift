@@ -64,6 +64,15 @@ final class SandboxTerminalController: ObservableObject {
     static func containerName(forCourseId courseId: String) -> String { "ea-\(courseId.lowercased())" }
     private var containerName: String { Self.containerName(forCourseId: courseId) }
 
+    /// What `pwd` actually prints in this sandbox — the real HOME the shell was started with.
+    /// Used to correct the placeholder home paths generated courses invent.
+    var sandboxHomePath: String {
+        switch environment {
+        case .macos: return confined ? workingDirectory.path : NSHomeDirectory()
+        case .linux: return "/root" // the container's HOME and working dir
+        }
+    }
+
     /// File checks for the verifier: host filesystem on macOS, container `exec` on Linux.
     var fileSystem: SandboxFileSystem {
         switch environment {
