@@ -67,6 +67,19 @@ struct GenerationResult {
     let wasCached: Bool
 }
 
+enum CourseGenerationError: Error, LocalizedError {
+    case unsolvableChallenges([GateFailure])
+
+    var errorDescription: String? {
+        switch self {
+        case .unsolvableChallenges(let failures):
+            let named = failures.map { "“\($0.title)”" }.joined(separator: ", ")
+            let subject = failures.count == 1 ? "\(named) asks" : "\(named) ask"
+            return "\(subject) the student to work on files the course never creates, so \(failures.count == 1 ? "it" : "they") can't be completed in an empty sandbox. Regenerating didn't fix it — try rewording the subject."
+        }
+    }
+}
+
 final class CourseGenerator {
     private let client: ClaudeClient
     private let store: CourseStore
@@ -82,12 +95,28 @@ final class CourseGenerator {
         if !forceRefresh, let cached = existing {
             return GenerationResult(course: cached, wasCached: true)
         }
-        let draft = try await client.generateCourse(subject: trimmed, containerGuidance: containerGuidance)
+        let draft = try await screenedDraft(subject: trimmed, containerGuidance: containerGuidance)
         // Regenerating a subject keeps the previous course's id so the student's progress,
         // saved results, and allocated sandbox dirs stay attached instead of being orphaned
         // under an id nothing references any more.
         let course = Course(id: existing?.id ?? UUID().uuidString, subject: trimmed, draft: draft)
         try store.save(course)
         return GenerationResult(course: course, wasCached: false)
+    }
+
+    /// Generates a draft and screens it for challenges the empty sandbox can't support.
+    ///
+    /// A failure is usually a one-off slip rather than a property of the subject, so the first
+    /// bad draft is simply thrown away and regenerated. Only a second failure is reported — at
+    /// which point the subject itself is likely the problem, and caching the course would mean
+    /// handing the student a lesson they cannot finish.
+    private func screenedDraft(subject: String, containerGuidance: String?) async throws -> CourseDraft {
+        let first = try await client.generateCourse(subject: subject, containerGuidance: containerGuidance)
+        if await CourseGate.screen(first).isEmpty { return first }
+
+        let second = try await client.generateCourse(subject: subject, containerGuidance: containerGuidance)
+        let failures = await CourseGate.screen(second)
+        guard failures.isEmpty else { throw CourseGenerationError.unsolvableChallenges(failures) }
+        return second
     }
 }

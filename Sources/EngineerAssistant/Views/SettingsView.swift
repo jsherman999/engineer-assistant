@@ -4,8 +4,15 @@ struct SettingsView: View {
     @EnvironmentObject var session: AppSession
     @Environment(\.dismiss) private var dismiss
     @State private var apiKey: String = ""
+    @State private var typeSafeKey: String = ""
+    @State private var typeSafeConfigured: Bool = TypeSafeClient.isConfigured
     @State private var saveError: String?
     @State private var pinResetNote: String?
+
+    private var hasPendingEdits: Bool {
+        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !typeSafeKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -39,6 +46,33 @@ struct SettingsView: View {
                         session.refreshAPIKeyStatus()
                     }
                     .disabled(!session.apiKeyConfigured)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("TypeSafe API Key (optional)")
+                    .font(.headline)
+                Text("Screens generated courses for challenges the sandbox can't support, before they're saved. Without a key, courses generate exactly as before.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField("apikey_… (optional)", text: $typeSafeKey)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    if typeSafeConfigured {
+                        Label("Course screening on", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green).font(.caption)
+                    } else {
+                        Label("Course screening off", systemImage: "minus.circle")
+                            .foregroundStyle(.secondary).font(.caption)
+                    }
+                    Spacer()
+                    Button("Clear") {
+                        Keychain.delete(KeychainKeys.typeSafeAPIKey)
+                        typeSafeConfigured = false
+                    }
+                    .disabled(!typeSafeConfigured)
                 }
             }
 
@@ -84,17 +118,27 @@ struct SettingsView: View {
                 Button("Cancel") { dismiss() }
                 Button("Save") { save() }
                     .keyboardShortcut(.return)
-                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!hasPendingEdits)
             }
         }
         .padding(20)
-        .frame(width: 460, height: 460)
+        .frame(width: 460, height: 580)
     }
 
+    /// Saves whichever keys were actually typed, so either can be set without clearing the other.
     private func save() {
+        let anthropic = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typeSafe = typeSafeKey.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            try session.setAPIKey(apiKey.trimmingCharacters(in: .whitespacesAndNewlines))
-            apiKey = ""
+            if !anthropic.isEmpty {
+                try session.setAPIKey(anthropic)
+                apiKey = ""
+            }
+            if !typeSafe.isEmpty {
+                try Keychain.set(typeSafe, for: KeychainKeys.typeSafeAPIKey)
+                typeSafeKey = ""
+                typeSafeConfigured = true
+            }
             dismiss()
         } catch {
             saveError = "Could not save key: \(error.localizedDescription)"
