@@ -10,6 +10,24 @@ struct NoulQuestion {
     let whenFalse: String
 }
 
+/// One "pick exactly one of these" question. The returned probabilities sum to 1, which makes
+/// them usable as a ranking over the options rather than just a winner.
+struct ChoiceQuestion {
+    let id: String
+    let instructions: String
+    /// Option id → what that option means.
+    let options: [String: String]
+}
+
+/// Everything a response can carry back, keyed by question id.
+struct TypeSafeAnswers: Equatable {
+    var nouls: [String: Double] = [:]
+    /// Question id → (option id → probability).
+    var choices: [String: [String: Double]] = [:]
+    /// Question id → how concentrated that choice's distribution is.
+    var confidence: [String: Double] = [:]
+}
+
 enum TypeSafeError: Error, LocalizedError {
     case missingAPIKey
     case httpError(Int, String)
@@ -48,17 +66,31 @@ struct TypeSafeClient {
         !(Keychain.get(KeychainKeys.typeSafeAPIKey) ?? "").isEmpty
     }
 
+    /// Yes/no questions only — the shape `CourseGate` needs.
     func ask(state: [String: Any], questions: [NoulQuestion]) async throws -> [String: Double] {
+        try await ask(state: state, nouls: questions, choices: []).nouls
+    }
+
+    func ask(state: [String: Any],
+             nouls: [NoulQuestion],
+             choices: [ChoiceQuestion]) async throws -> TypeSafeAnswers {
         guard let apiKey = Keychain.get(KeychainKeys.typeSafeAPIKey), !apiKey.isEmpty else {
             throw TypeSafeError.missingAPIKey
         }
 
         var questionBody: [String: Any] = [:]
-        for question in questions {
+        for question in nouls {
             questionBody[question.id] = [
                 "type": "noul",
                 "instructions": question.instructions,
                 "criteria": ["true": question.whenTrue, "false": question.whenFalse]
+            ]
+        }
+        for question in choices {
+            questionBody[question.id] = [
+                "type": "choice",
+                "instructions": question.instructions,
+                "criteria": question.options
             ]
         }
 
@@ -78,19 +110,29 @@ struct TypeSafeClient {
         guard http.statusCode == 200 else {
             throw TypeSafeError.httpError(http.statusCode, String(decoding: data, as: UTF8.self))
         }
-        return try Self.parse(data)
+        return try Self.parseAnswers(data)
     }
 
     /// Pulls `answers.<id>.noul` out of a response body. Separated so it can be tested without
     /// a network round trip.
     static func parse(_ data: Data) throws -> [String: Double] {
+        try parseAnswers(data).nouls
+    }
+
+    /// Full parse: yes/no answers, choice distributions, and per-choice confidence.
+    static func parseAnswers(_ data: Data) throws -> TypeSafeAnswers {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let answers = root["answers"] as? [String: Any] else {
             throw TypeSafeError.decodingError
         }
-        var out: [String: Double] = [:]
-        for (id, answer) in answers {
-            if let noul = (answer as? [String: Any])?["noul"] as? Double { out[id] = noul }
+        var out = TypeSafeAnswers()
+        for (id, raw) in answers {
+            guard let answer = raw as? [String: Any] else { continue }
+            if let noul = answer["noul"] as? Double { out.nouls[id] = noul }
+            if let probabilities = answer["probabilities"] as? [String: Double] {
+                out.choices[id] = probabilities
+            }
+            if let confidence = answer["confidence"] as? Double { out.confidence[id] = confidence }
         }
         return out
     }

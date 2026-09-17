@@ -7,6 +7,7 @@ struct RootView: View {
     @State private var showingInstructor = false
     @State private var showingReview = false
     @State private var showingProgress = false
+    @State private var showingLogs = false
 
     /// Reading resultsRevision keeps the badge current after a challenge check.
     private var dueCount: Int {
@@ -65,6 +66,14 @@ struct RootView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    showingLogs = true
+                } label: {
+                    Label("Logs", systemImage: "doc.text.magnifyingglass")
+                }
+                .help("Triage a real system log")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     showingSettings = true
                 } label: {
                     Label("Settings", systemImage: "gearshape")
@@ -89,6 +98,10 @@ struct RootView: View {
         }
         .sheet(isPresented: $showingProgress) {
             StudentProgressView()
+                .environmentObject(session)
+        }
+        .sheet(isPresented: $showingLogs) {
+            LogTriageView()
                 .environmentObject(session)
         }
         .background(

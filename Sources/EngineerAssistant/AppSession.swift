@@ -50,6 +50,11 @@ final class AppSession: ObservableObject {
     @Published var errorHelpText: String? = nil
     /// Bumped whenever saved lesson results change, so result views re-render.
     @Published private(set) var resultsRevision: Int = 0
+    /// Sysadmin helper: the current log triage, and which stage of it is running.
+    @Published var logTriage: TriageResult? = nil
+    @Published var logTriageScanning: Bool = false
+    @Published var logTriageRanking: Bool = false
+    @Published var logTriageError: String? = nil
 
     /// Session boundary: quit, or this long without student activity.
     static let idleTimeout: TimeInterval = 30 * 60
@@ -199,6 +204,44 @@ final class AppSession: ObservableObject {
                 errorHelpText = "Couldn't explain that right now: \(error.localizedDescription)"
             }
             errorHelpLoading = false
+        }
+    }
+
+    // MARK: - Log triage (sysadmin helper)
+
+    /// Narrows a log to the problems worth looking at: a local pattern-match and deduplication
+    /// first, then — only if a key is set — the model ranking the survivors.
+    ///
+    /// The two stages are published separately because the first one finishes in about a second
+    /// on a 36 MB file and is useful on its own; making the student wait for the network to see
+    /// it would hide the fact that most of this is ordinary code.
+    func triageLog(at path: String) {
+        guard !logTriageScanning, !logTriageRanking else { return }
+        noteActivity()
+        logTriageError = nil
+        logTriage = nil
+        logTriageScanning = true
+
+        Task {
+            let scanned: TriageResult
+            do {
+                scanned = try await Task.detached(priority: .userInitiated) {
+                    try LogTriage.scanFile(at: path)
+                }.value
+            } catch {
+                logTriageError = "Couldn't read \(path): \(error.localizedDescription)"
+                logTriageScanning = false
+                return
+            }
+            logTriage = scanned
+            logTriageScanning = false
+
+            guard TypeSafeClient.isConfigured, !scanned.problems.isEmpty else { return }
+            logTriageRanking = true
+            let ranked = await LogTriage.rank(scanned)
+            // Ignore a stale ranking if the student has already started another scan.
+            if logTriage?.path == ranked.path { logTriage = ranked }
+            logTriageRanking = false
         }
     }
 
